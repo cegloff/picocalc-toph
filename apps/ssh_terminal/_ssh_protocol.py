@@ -6,6 +6,7 @@ Pure protocol — no UI dependencies
 
 from micropython import const
 import usocket as socket
+import select
 import struct
 import hashlib
 import uos as os
@@ -306,6 +307,7 @@ class SSHClient:
         self._remote_max_pkt = 0
         self._channel_eof = False
         self._channel_closed = False
+        self._local_consumed = 0
 
     @property
     def is_connected(self):
@@ -760,6 +762,190 @@ class SSHClient:
         while lines and not lines[-1].strip():
             lines.pop()
         return lines
+
+    # ---- PTY / Shell / Non-blocking I/O ----
+
+    def _wait_channel_reply(self, name):
+        while True:
+            resp = self._read_ssh_packet()
+            t = resp[0]
+            if t == SSH_MSG_CHANNEL_SUCCESS:
+                return
+            if t == SSH_MSG_CHANNEL_FAILURE:
+                raise Exception("%s request failed" % name)
+            if t == SSH_MSG_CHANNEL_WINDOW_ADJUST:
+                off = 1
+                _, off = _parse_uint32(resp, off)
+                adj, _ = _parse_uint32(resp, off)
+                self._remote_window += adj
+                continue
+            if t == SSH_MSG_CHANNEL_DATA or t == SSH_MSG_CHANNEL_EXTENDED_DATA:
+                continue  # discard early data
+            if t == SSH_MSG_CHANNEL_REQUEST:
+                off = 1
+                _, off = _parse_uint32(resp, off)
+                rtype, off = _parse_string(resp, off)
+                want = resp[off] if off < len(resp) else 0
+                if want:
+                    sp = bytearray()
+                    sp.append(SSH_MSG_CHANNEL_SUCCESS)
+                    sp.extend(struct.pack(">I", self._remote_channel))
+                    self._send_packet(bytes(sp))
+                continue
+            if t == SSH_MSG_CHANNEL_EOF:
+                self._channel_eof = True
+                continue
+            if t == SSH_MSG_CHANNEL_CLOSE:
+                self._channel_closed = True
+                raise Exception("%s: channel closed" % name)
+
+    def request_pty(self, cols, rows, term="xterm"):
+        p = bytearray()
+        p.append(SSH_MSG_CHANNEL_REQUEST)
+        p.extend(struct.pack(">I", self._remote_channel))
+        p.extend(_ssh_string("pty-req"))
+        p.append(1)  # want reply
+        p.extend(_ssh_string(term))
+        p.extend(struct.pack(">IIII", cols, rows, cols * 8, rows * 16))
+        p.extend(_ssh_string(""))  # terminal modes (empty)
+        self._send_packet(bytes(p))
+        self._wait_channel_reply("PTY")
+
+    def request_shell(self):
+        p = bytearray()
+        p.append(SSH_MSG_CHANNEL_REQUEST)
+        p.extend(struct.pack(">I", self._remote_channel))
+        p.extend(_ssh_string("shell"))
+        p.append(1)  # want reply
+        self._send_packet(bytes(p))
+        self._wait_channel_reply("Shell")
+
+    def open_shell(self, cols, rows):
+        self._sock.settimeout(15.0)
+        self._open_session_channel()
+        self.request_pty(cols, rows)
+        self.request_shell()
+        self._sock.settimeout(0.1)
+        self._local_consumed = 0
+
+    def send_data(self, data):
+        if isinstance(data, str):
+            data = data.encode()
+        while data:
+            chunk_len = min(len(data), self._remote_window, self._remote_max_pkt)
+            if chunk_len <= 0:
+                break
+            p = bytearray()
+            p.append(SSH_MSG_CHANNEL_DATA)
+            p.extend(struct.pack(">I", self._remote_channel))
+            p.extend(_ssh_string(data[:chunk_len]))
+            self._send_packet(bytes(p))
+            self._remote_window -= chunk_len
+            data = data[chunk_len:]
+
+    def poll_data(self):
+        if not self._connected or self._channel_closed:
+            return None
+        poller = select.poll()
+        poller.register(self._sock, select.POLLIN)
+        ready = poller.poll(0)
+        poller.unregister(self._sock)
+        if not ready:
+            return None
+        result = bytearray()
+        burst = 0
+        while burst < 8:
+            try:
+                self._sock.settimeout(0.5)
+                payload = self._read_packet()
+            except Exception as e:
+                s = str(e)
+                if "timed out" in s or "ETIMEDOUT" in s:
+                    break
+                self._connected = False
+                self._channel_closed = True
+                break
+            if not payload:
+                break
+            t = payload[0]
+            if t in (SSH_MSG_IGNORE, SSH_MSG_DEBUG, SSH_MSG_UNIMPLEMENTED):
+                continue
+            if t == SSH_MSG_GLOBAL_REQUEST:
+                self._send_packet(bytes([SSH_MSG_REQUEST_FAILURE]))
+                continue
+            if t == SSH_MSG_DISCONNECT:
+                self._connected = False
+                self._channel_closed = True
+                break
+            if t == SSH_MSG_CHANNEL_DATA:
+                off = 1
+                _, off = _parse_uint32(payload, off)
+                data, _ = _parse_string(payload, off)
+                result.extend(data)
+                self._local_consumed += len(data)
+                burst += 1
+            elif t == SSH_MSG_CHANNEL_EXTENDED_DATA:
+                off = 1
+                _, off = _parse_uint32(payload, off)
+                _, off = _parse_uint32(payload, off)  # data type
+                data, _ = _parse_string(payload, off)
+                result.extend(data)
+                self._local_consumed += len(data)
+                burst += 1
+            elif t == SSH_MSG_CHANNEL_WINDOW_ADJUST:
+                off = 1
+                _, off = _parse_uint32(payload, off)
+                adj, _ = _parse_uint32(payload, off)
+                self._remote_window += adj
+            elif t == SSH_MSG_CHANNEL_EOF:
+                self._channel_eof = True
+            elif t == SSH_MSG_CHANNEL_CLOSE:
+                self._channel_closed = True
+                cp = bytearray()
+                cp.append(SSH_MSG_CHANNEL_CLOSE)
+                cp.extend(struct.pack(">I", self._remote_channel))
+                try:
+                    self._send_packet(bytes(cp))
+                except Exception:
+                    pass
+                break
+            elif t == SSH_MSG_CHANNEL_REQUEST:
+                off = 1
+                _, off = _parse_uint32(payload, off)
+                rtype, off = _parse_string(payload, off)
+                want = payload[off] if off < len(payload) else 0
+                if want:
+                    sp = bytearray()
+                    sp.append(SSH_MSG_CHANNEL_SUCCESS)
+                    sp.extend(struct.pack(">I", self._remote_channel))
+                    self._send_packet(bytes(sp))
+            # Check if more data available without blocking
+            poller = select.poll()
+            poller.register(self._sock, select.POLLIN)
+            more = poller.poll(0)
+            poller.unregister(self._sock)
+            if not more:
+                break
+        # Auto-adjust window
+        if self._local_consumed >= 0x8000:
+            self.adjust_window(self._local_consumed)
+            self._local_consumed = 0
+        return bytes(result) if result else None
+
+    def send_window_change(self, cols, rows):
+        p = bytearray()
+        p.append(SSH_MSG_CHANNEL_REQUEST)
+        p.extend(struct.pack(">I", self._remote_channel))
+        p.extend(_ssh_string("window-change"))
+        p.append(0)  # no reply
+        p.extend(struct.pack(">IIII", cols, rows, cols * 8, rows * 16))
+        self._send_packet(bytes(p))
+
+    def adjust_window(self, bytes_consumed):
+        p = bytearray()
+        p.append(SSH_MSG_CHANNEL_WINDOW_ADJUST)
+        p.extend(struct.pack(">II", self._remote_channel, bytes_consumed))
+        self._send_packet(bytes(p))
 
     # ---- Public API ----
 
