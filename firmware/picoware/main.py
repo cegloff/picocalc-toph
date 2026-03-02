@@ -102,7 +102,18 @@ def _list_apps(storage):
         except Exception:
             pass
 
-        apps.append({"slug": entry, "name": name})
+        # load icon pixel data (strip 4-byte header)
+        icon = None
+        icon_path = folder + "/icon.raw"
+        if storage.exists(icon_path):
+            try:
+                raw = storage.read(icon_path, "b")
+                if raw and len(raw) > 4:
+                    icon = raw[4:]
+            except Exception:
+                pass
+
+        apps.append({"slug": entry, "name": name, "icon": icon})
 
     apps.sort(key=lambda a: a["name"])
     return apps
@@ -465,35 +476,42 @@ def main():
 
     while True:
         # build launcher items
-        builtin = ["Settings", "App Store"]
+        from picoware.ui.icons import ICON_SETTINGS, ICON_APPSTORE, ICON_POWEROFF
+
         try:
             apps = _list_apps(ctx.storage)
         except Exception as e:
             print("_list_apps failed:", e)
             apps = []
-        app_labels = [a["name"] for a in apps]
-        all_labels = builtin + app_labels + ["Power Off"]
 
-        from picoware.ui.menu import Menu
+        grid_items = [
+            {"name": "Settings", "icon": ICON_SETTINGS[4:]},
+            {"name": "App Store", "icon": ICON_APPSTORE[4:]},
+        ]
+        for a in apps:
+            grid_items.append({"name": a["name"], "icon": a.get("icon")})
+        grid_items.append({"name": "Power Off", "icon": ICON_POWEROFF[4:]})
+
+        from picoware.ui.grid import IconGrid
         from picoware.ui.statusbar import StatusBar
 
         statusbar = StatusBar(ctx.display, ctx.hw, ctx.settings, ctx.wifi)
         sb_h = statusbar.height
 
-        menu = Menu(
-            ctx.display, all_labels, title="PicoCalcOS",
+        grid = IconGrid(
+            ctx.display, grid_items, title="PicoCalcOS",
             y=sb_h, h=320 - sb_h,
         )
 
         # launcher loop
         in_launcher = True
         while in_launcher:
-            # draw status bar then menu
+            # draw status bar then grid
             ctx.display.clear()
             statusbar.draw()
-            menu._y = sb_h
-            menu._h = 320 - sb_h
-            menu.draw(force=True)
+            grid._y = sb_h
+            grid._h = 320 - sb_h
+            grid.draw(force=True)
 
             # wait for input
             while True:
@@ -502,34 +520,35 @@ def main():
                 if k == -1:
                     continue
 
-                result = menu.handle_input(k)
+                result = grid.handle_input(k)
                 if result is not None:
                     break
 
                 # redraw on nav
                 ctx.display.clear()
                 statusbar.draw()
-                menu.draw(force=True)
+                grid.draw(force=True)
 
             if result == -1:
                 continue  # no back from launcher
 
-            choice = all_labels[result]
+            idx = result
+            n_builtin = 2  # Settings, App Store
 
-            if choice == "Settings":
+            if idx == 0:
                 _run_settings(ctx)
 
-            elif choice == "App Store":
+            elif idx == 1:
                 from picoware.net.appstore import run_appstore
                 run_appstore(ctx)
                 collect()
 
-            elif choice == "Power Off":
+            elif idx == len(grid_items) - 1:
                 ctx.hw.power_off()
 
             else:
                 # load and run app
-                app_index = result - len(builtin)
+                app_index = idx - n_builtin
                 app_info = apps[app_index]
                 slug = app_info["slug"]
                 display_name = app_info["name"]

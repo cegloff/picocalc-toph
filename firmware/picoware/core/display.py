@@ -14,6 +14,7 @@ from picoware_lcd import (
     draw_text,
     draw_char,
     set_mode,
+    draw_image_bytearray as _draw_image,
     FONT_DEFAULT,
 )
 from picoware_keyboard import set_background_poll
@@ -121,6 +122,11 @@ class Display:
 
     def fill_triangle(self, x1, y1, x2, y2, x3, y3, color=None):
         fill_triangle(x1, y1, x2, y2, x3, y3, color if color is not None else self.fg)
+
+    # -- Image --
+
+    def draw_image(self, x, y, w, h, data, invert=False):
+        _draw_image(x, y, w, h, data, invert)
 
     # -- Text --
 

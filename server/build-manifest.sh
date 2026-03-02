@@ -25,6 +25,12 @@ for app_json in "$APPS_DIR"/*/app.json; do
         files="$files\"$fname\""
     done
 
+    # Include icon.raw if present
+    if [ -f "$app_dir/icon.raw" ]; then
+        [ -n "$files" ] && files="$files,"
+        files="$files\"icon.raw\""
+    fi
+
     # Total size in bytes
     size=$(du -sb "$app_dir" | cut -f1)
 
