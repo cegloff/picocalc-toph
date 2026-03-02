@@ -465,7 +465,7 @@ def main():
 
     while True:
         # build launcher items
-        builtin = ["Settings"]
+        builtin = ["Settings", "App Store"]
         try:
             apps = _list_apps(ctx.storage)
         except Exception as e:
@@ -518,6 +518,11 @@ def main():
 
             if choice == "Settings":
                 _run_settings(ctx)
+
+            elif choice == "App Store":
+                from picoware.net.appstore import run_appstore
+                run_appstore(ctx)
+                collect()
 
             elif choice == "Power Off":
                 ctx.hw.power_off()
