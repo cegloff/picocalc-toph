@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tophcalc
+  namespace: tophcalc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tophcalc
+  template:
+    metadata:
+      labels:
+        app: tophcalc
+    spec:
+      containers:
+      - name: tophcalc
+        image: registry.egloff.tech:5000/tophcalc:latest
+        ports:
+        - containerPort: 80
+          name: http
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+          initialDelaySeconds: 2
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"

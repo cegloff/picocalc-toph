@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tophcalc-ingress
+  namespace: tophcalc
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: tophcalc.egloff.tech
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tophcalc-service
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - tophcalc.egloff.tech
+    secretName: tophcalc-tls
