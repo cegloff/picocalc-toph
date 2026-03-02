@@ -6,7 +6,7 @@ from micropython import const
 from gc import collect
 from picoware.core.input import (
     KEY_ENTER, KEY_ESC, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
-    KEY_BACKSPACE, KEY_F1, KEY_F10
+    KEY_BACKSPACE, KEY_F1, KEY_F2, KEY_F10
 )
 from picoware.core.display import WHITE, CYAN, DARK_GRAY, LIGHT_GRAY
 
@@ -15,6 +15,7 @@ _ST_CONVOS = const(1)
 _ST_MODEL = const(2)
 _ST_CHAT = const(3)
 _ST_SETTINGS = const(4)
+_ST_TOOLS = const(5)
 
 _DATA_DIR = "picoware/data/chat"
 _API_HOST = "bots.egloff.tech"
@@ -36,6 +37,16 @@ _scroll = 0
 _dirty = True
 _input_buf = []
 _input_cur = 0
+_tools = []
+_enabled_tools = []
+_enabled_features = []
+_tools_return = _ST_SETTINGS
+
+_FEATURES = [
+    {"id": "web_search", "name": "Web Search"},
+    {"id": "image_generation", "name": "Image Generation"},
+    {"id": "code_interpreter", "name": "Code Interpreter"},
+]
 
 
 # ── data ──────────────────────────────────────────────────────────
@@ -46,14 +57,19 @@ def _dirs(ctx):
 
 
 def _load_cfg(ctx):
-    global _cfg
+    global _cfg, _enabled_tools, _enabled_features
     d = ctx.storage.read_json(_DATA_DIR + "/settings.json")
     _cfg = {"api_key": d.get("api_key", ""), "model": d.get("model", "")}
+    _enabled_tools = d.get("tool_ids", [])
+    _enabled_features = d.get("feature_ids", [])
 
 
 def _save_cfg(ctx):
     _dirs(ctx)
-    ctx.storage.write_json(_DATA_DIR + "/settings.json", _cfg)
+    data = dict(_cfg)
+    data["tool_ids"] = _enabled_tools
+    data["feature_ids"] = _enabled_features
+    ctx.storage.write_json(_DATA_DIR + "/settings.json", data)
 
 
 def _load_convos(ctx):
@@ -124,7 +140,11 @@ def _draw_chat(ctx):
     d = ctx.display
     d.clear()
     d.fill_rect(0, 0, 320, _MSG_Y0, DARK_GRAY)
-    d.text(2, 1, _model[:50], LIGHT_GRAY, _FONT)
+    _tc = len(_enabled_tools) + len(_enabled_features)
+    label = _model[:50]
+    if _tc:
+        label = _model[:44] + " T:" + str(_tc)
+    d.text(2, 1, label, LIGHT_GRAY, _FONT)
 
     lines = []
     for msg in _msgs:
@@ -159,7 +179,7 @@ def _draw_chat(ctx):
 
     # hint bar
     d.fill_rect(0, _HINT_Y, 320, 30, DARK_GRAY)
-    d.text(2, _HINT_Y + 2, "ENTER:send ^/v:scroll ESC:back", LIGHT_GRAY, _FONT)
+    d.text(2, _HINT_Y + 2, "ENTER:send ^/v:scroll F2:tools ESC:back", LIGHT_GRAY, _FONT)
     d.swap()
 
 
@@ -197,6 +217,26 @@ def _fetch_models(ctx):
     return models
 
 
+def _fetch_tools(ctx):
+    from picoware.net.http import http_get
+    from json import loads
+    body, _ = http_get(_API_HOST, "/api/v1/tools/", headers=_hdrs())
+    collect()
+    data = loads(body)
+    del body
+    collect()
+    items = data if isinstance(data, list) else data.get("data", [])
+    tools = []
+    for t in items:
+        tid = t.get("id", "")
+        name = t.get("name", tid)
+        if tid:
+            tools.append({"id": tid, "name": name})
+    del data
+    collect()
+    return tools
+
+
 def _send_msg(ctx, text):
     global _dirty, _scroll
     _msgs.append({"role": "user", "content": text})
@@ -210,7 +250,13 @@ def _send_msg(ctx, text):
     api_msgs = _msgs[:-1]
     if len(api_msgs) > 20:
         api_msgs = api_msgs[-20:]
-    body = dumps({"model": _model, "messages": api_msgs, "stream": True})
+    req = {"model": _model, "messages": api_msgs, "stream": True}
+    if _enabled_tools:
+        req["tool_ids"] = _enabled_tools
+    if _enabled_features:
+        req["features"] = {fid: True for fid in _enabled_features}
+    body = dumps(req)
+    del req
     del api_msgs
     collect()
 
@@ -251,8 +297,14 @@ def _send_msg(ctx, text):
                     delta = chunk["choices"][0]["delta"]
                     content = delta.get("content", "")
                     if content:
+                        if _msgs[-1]["content"] == "[Using tools...]":
+                            _msgs[-1]["content"] = ""
                         _msgs[-1]["content"] += content
                         _draw_chat(ctx)
+                    elif delta.get("tool_calls"):
+                        if not _msgs[-1]["content"]:
+                            _msgs[-1]["content"] = "[Using tools...]"
+                            _draw_chat(ctx)
                 except:
                     pass
     except Exception as e:
@@ -284,6 +336,7 @@ def start(ctx):
 
 def run(ctx):
     global _state, _menu, _dirty, _scroll, _model, _slug, _msgs, _input_buf, _input_cur
+    global _tools, _enabled_tools, _enabled_features, _tools_return
 
     k = ctx.input.key
 
@@ -446,6 +499,14 @@ def run(ctx):
             _menu = None
             _dirty = True
             return
+        if k == KEY_F2:
+            _save_chat(ctx)
+            _update_index(ctx)
+            _tools_return = _ST_CHAT
+            _state = _ST_TOOLS
+            _menu = None
+            _dirty = True
+            return
         c = ctx.input.char
         if c and c != '\n' and c != '\t':
             _input_buf.insert(_input_cur, c)
@@ -461,12 +522,12 @@ def run(ctx):
         if _menu is None:
             from picoware.ui.menu import Menu
             _menu = Menu(ctx.display,
-                         ["Edit API Key", "Clear History", "Back"],
+                         ["Edit API Key", "Manage Tools", "Clear History", "Back"],
                          title="Settings")
             _dirty = True
         if k != -1:
             r = _menu.handle_input(k)
-            if r == -1 or r == 2:
+            if r == -1 or r == 3:
                 _state = _ST_CONVOS
                 _menu = None
                 _dirty = True
@@ -481,6 +542,12 @@ def run(ctx):
                 _dirty = True
                 return
             if r == 1:
+                _tools_return = _ST_SETTINGS
+                _state = _ST_TOOLS
+                _menu = None
+                _dirty = True
+                return
+            if r == 2:
                 from picoware.ui.dialog import confirm
                 if confirm(ctx.display, ctx.input, "Delete all conversations?"):
                     _convos.clear()
@@ -493,11 +560,80 @@ def run(ctx):
         if _dirty:
             _menu.draw(force=True)
             _dirty = False
+        return
+
+    # ── tool selection ──
+    if _state == _ST_TOOLS:
+        if _menu is None:
+            if not ctx.wifi or not ctx.wifi.is_connected:
+                from picoware.ui.dialog import alert
+                alert(ctx.display, ctx.input, "WiFi not connected")
+                _state = _tools_return
+                _menu = None
+                _dirty = True
+                return
+            _show_status(ctx, "Loading tools...")
+            try:
+                _tools = _fetch_tools(ctx)
+            except Exception as e:
+                _tools = []
+            labels = _tool_labels() + ["Done"]
+            from picoware.ui.menu import Menu
+            _menu = Menu(ctx.display, labels, title="Tools")
+            _dirty = True
+        if k != -1:
+            nf = len(_FEATURES)
+            nt = len(_tools)
+            r = _menu.handle_input(k)
+            if r == -1:
+                _state = _tools_return
+                _menu = None
+                _dirty = True
+                return
+            if r is not None:
+                if r == nf + nt:
+                    _save_cfg(ctx)
+                    _state = _tools_return
+                    _menu = None
+                    _dirty = True
+                    return
+                if r < nf:
+                    fid = _FEATURES[r]["id"]
+                    if fid in _enabled_features:
+                        _enabled_features.remove(fid)
+                    else:
+                        _enabled_features.append(fid)
+                else:
+                    tid = _tools[r - nf]["id"]
+                    if tid in _enabled_tools:
+                        _enabled_tools.remove(tid)
+                    else:
+                        _enabled_tools.append(tid)
+                sel = _menu._selected
+                scr = _menu._scroll
+                _menu.items = _tool_labels() + ["Done"]
+                _menu._selected = sel
+                _menu._scroll = scr
+            _dirty = True
+        if _dirty:
+            _menu.draw(force=True)
+            _dirty = False
+
+
+def _tool_labels():
+    labels = []
+    for f in _FEATURES:
+        prefix = "[x] " if f["id"] in _enabled_features else "[ ] "
+        labels.append(prefix + f["name"][:(_MAX_CHARS - 5)])
+    for t in _tools:
+        prefix = "[x] " if t["id"] in _enabled_tools else "[ ] "
+        labels.append(prefix + t["name"][:(_MAX_CHARS - 5)])
+    return labels
 
 
 def stop(ctx):
     global _state, _cfg, _convos, _menu, _msgs, _model, _slug, _scroll, _dirty
-    global _input_buf, _input_cur
+    global _input_buf, _input_cur, _tools, _enabled_tools, _enabled_features, _tools_return
     _state = _ST_CONVOS
     _cfg = None
     _convos = []
@@ -509,4 +645,8 @@ def stop(ctx):
     _dirty = True
     _input_buf = []
     _input_cur = 0
+    _tools = []
+    _enabled_tools = []
+    _enabled_features = []
+    _tools_return = _ST_SETTINGS
     collect()
