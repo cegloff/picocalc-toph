@@ -5,8 +5,10 @@ PLUGIN_NAME = "AI Chat"
 from micropython import const
 from gc import collect
 from picoware.core.input import (
-    KEY_ENTER, KEY_ESC, KEY_UP, KEY_DOWN, KEY_BACKSPACE, KEY_F1, KEY_F10
+    KEY_ENTER, KEY_ESC, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT,
+    KEY_BACKSPACE, KEY_F1, KEY_F10
 )
+from picoware.core.display import WHITE, CYAN, DARK_GRAY, LIGHT_GRAY
 
 _ST_SETUP = const(0)
 _ST_CONVOS = const(1)
@@ -18,7 +20,9 @@ _DATA_DIR = "picoware/data/chat"
 _API_HOST = "bots.egloff.tech"
 _MAX_CHARS = const(63)
 _MSG_Y0 = const(10)
-_MSG_LINES = const(36)
+_MSG_LINES = const(33)
+_INPUT_Y = const(276)
+_HINT_Y = const(290)
 _FONT = const(0)
 
 _state = _ST_CONVOS
@@ -30,6 +34,8 @@ _model = ""
 _slug = ""
 _scroll = 0
 _dirty = True
+_input_buf = []
+_input_cur = 0
 
 
 # ── data ──────────────────────────────────────────────────────────
@@ -117,13 +123,13 @@ def _draw_chat(ctx):
     _dirty = False
     d = ctx.display
     d.clear()
-    d.fill_rect(0, 0, 320, _MSG_Y0, d.DARK_GRAY)
-    d.text(2, 1, _model[:50], d.LIGHT_GRAY, _FONT)
+    d.fill_rect(0, 0, 320, _MSG_Y0, DARK_GRAY)
+    d.text(2, 1, _model[:50], LIGHT_GRAY, _FONT)
 
     lines = []
     for msg in _msgs:
         pfx = "You: " if msg["role"] == "user" else "AI: "
-        color = d.WHITE if msg["role"] == "user" else d.CYAN
+        color = WHITE if msg["role"] == "user" else CYAN
         for ln in _wrap(pfx + msg["content"], _MAX_CHARS):
             lines.append((ln, color))
         lines.append(("", 0))
@@ -142,15 +148,25 @@ def _draw_chat(ctx):
             d.text(2, y, t, c, _FONT)
         y += 8
 
-    d.fill_rect(0, 300, 320, 20, d.DARK_GRAY)
-    d.text(2, 306, "ENTER:msg UP/DN:scroll ESC:back", d.LIGHT_GRAY, _FONT)
+    # input bar
+    d.fill_rect(0, _INPUT_Y, 320, 12, DARK_GRAY)
+    inp = "> " + "".join(_input_buf)
+    d.text(2, _INPUT_Y + 2, inp[:_MAX_CHARS], WHITE, _FONT)
+    # blinking cursor
+    cx = 2 + (_input_cur + 2) * 5
+    if cx < 318:
+        d.fill_rect(cx, _INPUT_Y + 2, 1, 8, WHITE)
+
+    # hint bar
+    d.fill_rect(0, _HINT_Y, 320, 30, DARK_GRAY)
+    d.text(2, _HINT_Y + 2, "ENTER:send ^/v:scroll ESC:back", LIGHT_GRAY, _FONT)
     d.swap()
 
 
 def _show_status(ctx, msg):
     d = ctx.display
     d.clear()
-    d.text(10, 150, msg, d.WHITE, _FONT)
+    d.text(10, 150, msg, WHITE, _FONT)
     d.swap()
 
 
@@ -220,7 +236,6 @@ def _send_msg(ctx, text):
         return
 
     try:
-        sock.settimeout(120)
         while True:
             line = http_readline(sock)
             if not line:
@@ -268,7 +283,7 @@ def start(ctx):
 
 
 def run(ctx):
-    global _state, _menu, _dirty, _scroll, _model, _slug, _msgs
+    global _state, _menu, _dirty, _scroll, _model, _slug, _msgs, _input_buf, _input_cur
 
     k = ctx.input.key
 
@@ -314,8 +329,11 @@ def run(ctx):
                     _state = _ST_CHAT
                     _menu = None
                     _scroll = 0
+                    _input_buf = []
+                    _input_cur = 0
                     _dirty = True
                 return
+            _dirty = True
         if _dirty:
             _menu.draw(force=True)
             _dirty = False
@@ -364,10 +382,13 @@ def run(ctx):
                 _slug = str(ticks_ms())
                 _msgs = []
                 _scroll = 0
+                _input_buf = []
+                _input_cur = 0
                 _state = _ST_CHAT
                 _menu = None
                 _dirty = True
                 return
+            _dirty = True
         if _dirty:
             _menu.draw(force=True)
             _dirty = False
@@ -376,15 +397,32 @@ def run(ctx):
     # ── chat view ──
     if _state == _ST_CHAT:
         if k == KEY_ENTER:
-            from picoware.ui.dialog import text_input
-            text = text_input(ctx.display, ctx.input, title="Message")
+            text = "".join(_input_buf).strip()
             if text:
+                _input_buf.clear()
+                _input_cur = 0
                 if not ctx.wifi or not ctx.wifi.is_connected:
                     from picoware.ui.dialog import alert
                     alert(ctx.display, ctx.input, "WiFi not connected")
                 else:
                     _send_msg(ctx, text)
             _dirty = True
+            return
+        if k == KEY_BACKSPACE:
+            if _input_cur > 0:
+                _input_buf.pop(_input_cur - 1)
+                _input_cur -= 1
+                _dirty = True
+            return
+        if k == KEY_LEFT:
+            if _input_cur > 0:
+                _input_cur -= 1
+                _dirty = True
+            return
+        if k == KEY_RIGHT:
+            if _input_cur < len(_input_buf):
+                _input_cur += 1
+                _dirty = True
             return
         if k == KEY_UP:
             _scroll += 3
@@ -394,7 +432,7 @@ def run(ctx):
             _scroll = max(0, _scroll - 3)
             _dirty = True
             return
-        if k == KEY_ESC or k == KEY_BACKSPACE:
+        if k == KEY_ESC:
             _save_chat(ctx)
             _update_index(ctx)
             _state = _ST_CONVOS
@@ -406,6 +444,12 @@ def run(ctx):
             _update_index(ctx)
             _state = _ST_MODEL
             _menu = None
+            _dirty = True
+            return
+        c = ctx.input.char
+        if c and c != '\n' and c != '\t':
+            _input_buf.insert(_input_cur, c)
+            _input_cur += 1
             _dirty = True
             return
         if _dirty:
@@ -445,6 +489,7 @@ def run(ctx):
                 _menu = None
                 _dirty = True
                 return
+            _dirty = True
         if _dirty:
             _menu.draw(force=True)
             _dirty = False
@@ -452,6 +497,7 @@ def run(ctx):
 
 def stop(ctx):
     global _state, _cfg, _convos, _menu, _msgs, _model, _slug, _scroll, _dirty
+    global _input_buf, _input_cur
     _state = _ST_CONVOS
     _cfg = None
     _convos = []
@@ -461,4 +507,6 @@ def stop(ctx):
     _slug = ""
     _scroll = 0
     _dirty = True
+    _input_buf = []
+    _input_cur = 0
     collect()
