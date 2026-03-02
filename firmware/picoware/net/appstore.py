@@ -82,6 +82,8 @@ def _app_menu(ctx, apps):
             msg = "{} {}? ({}KB, {} files)".format(action, name, size_kb, len(files))
 
             if confirm(ctx.display, ctx.input, msg, "App Store"):
+                del menu, labels
+                gc.collect()
                 ok = _download_app(ctx, app)
                 if ok:
                     alert(ctx.display, ctx.input, "{} installed.".format(name), "App Store")
@@ -105,7 +107,15 @@ def _download_app(ctx, app):
     final_rel = "{}/{}".format(_APPS_PATH, slug)
     final_abs = "{}/{}".format(_SD_PREFIX, slug)
 
-    # create temp dir
+    gc.collect()
+
+    # clean stale temp dir from previous failed download
+    if ctx.storage.exists(tmp_rel):
+        try:
+            _rmdir(ctx, tmp_rel)
+        except:
+            pass
+
     ctx.storage.mkdir(tmp_rel)
 
     try:
@@ -114,21 +124,33 @@ def _download_app(ctx, app):
             path = "/apps/{}/{}".format(slug, fname)
             dest = "{}/{}".format(tmp_abs, fname)
 
-            f = open(dest, "wb")
-            written = [0]
-            cl = [0]
+            for attempt in range(2):
+                f = open(dest, "wb")
+                written = [0]
+                cl = [0]
+                _next_draw = [2048]
 
-            def _on_chunk(chunk, _f=f, _w=written, _ctx=ctx, _name=name,
-                          _i=i, _total=len(all_files), _fname=fname, _cl=cl):
-                _f.write(chunk)
-                _w[0] += len(chunk)
-                _draw_progress(_ctx, _name, _i, _total, _fname, _w[0], _cl[0])
+                def _on_chunk(chunk, _f=f, _w=written, _ctx=ctx, _name=name,
+                              _i=i, _total=len(all_files), _fname=fname,
+                              _cl=cl, _nd=_next_draw):
+                    _f.write(chunk)
+                    _w[0] += len(chunk)
+                    if _w[0] >= _nd[0]:
+                        _nd[0] = _w[0] + 2048
+                        _draw_progress(_ctx, _name, _i, _total, _fname, _w[0], _cl[0])
 
-            try:
-                total, content_length = http_get(_HOST, path, callback=_on_chunk)
-                cl[0] = content_length
-            finally:
-                f.close()
+                try:
+                    total, content_length = http_get(_HOST, path, callback=_on_chunk)
+                    cl[0] = content_length
+                    f.close()
+                    break  # success
+                except Exception as e:
+                    f.close()
+                    if attempt == 0:
+                        print("Download retry:", fname, e)
+                        gc.collect()
+                    else:
+                        raise
 
             gc.collect()
 

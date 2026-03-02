@@ -1,0 +1,464 @@
+"""AI Chat client for OpenWebUI."""
+
+PLUGIN_NAME = "AI Chat"
+
+from micropython import const
+from gc import collect
+from picoware.core.input import (
+    KEY_ENTER, KEY_ESC, KEY_UP, KEY_DOWN, KEY_BACKSPACE, KEY_F1, KEY_F10
+)
+
+_ST_SETUP = const(0)
+_ST_CONVOS = const(1)
+_ST_MODEL = const(2)
+_ST_CHAT = const(3)
+_ST_SETTINGS = const(4)
+
+_DATA_DIR = "picoware/data/chat"
+_API_HOST = "bots.egloff.tech"
+_MAX_CHARS = const(63)
+_MSG_Y0 = const(10)
+_MSG_LINES = const(36)
+_FONT = const(0)
+
+_state = _ST_CONVOS
+_cfg = None
+_convos = []
+_menu = None
+_msgs = []
+_model = ""
+_slug = ""
+_scroll = 0
+_dirty = True
+
+
+# ── data ──────────────────────────────────────────────────────────
+
+def _dirs(ctx):
+    ctx.storage.mkdir("picoware/data")
+    ctx.storage.mkdir(_DATA_DIR)
+
+
+def _load_cfg(ctx):
+    global _cfg
+    d = ctx.storage.read_json(_DATA_DIR + "/settings.json")
+    _cfg = {"api_key": d.get("api_key", ""), "model": d.get("model", "")}
+
+
+def _save_cfg(ctx):
+    _dirs(ctx)
+    ctx.storage.write_json(_DATA_DIR + "/settings.json", _cfg)
+
+
+def _load_convos(ctx):
+    global _convos
+    d = ctx.storage.read_json(_DATA_DIR + "/convos.json")
+    _convos = d if isinstance(d, list) else []
+
+
+def _save_convos(ctx):
+    _dirs(ctx)
+    ctx.storage.write_json(_DATA_DIR + "/convos.json", _convos)
+
+
+def _load_chat(ctx, slug):
+    global _msgs, _model, _slug
+    d = ctx.storage.read_json(_DATA_DIR + "/" + slug + ".json")
+    _msgs = d.get("messages", [])
+    _model = d.get("model", _cfg.get("model", ""))
+    _slug = slug
+
+
+def _save_chat(ctx):
+    if not _slug or not _msgs:
+        return
+    _dirs(ctx)
+    ctx.storage.write_json(
+        _DATA_DIR + "/" + _slug + ".json",
+        {"model": _model, "messages": _msgs}
+    )
+
+
+def _update_index(ctx):
+    if not _msgs:
+        return
+    title = "New chat"
+    for m in _msgs:
+        if m["role"] == "user":
+            title = m["content"][:30]
+            break
+    for c in _convos:
+        if c["slug"] == _slug:
+            c["title"] = title
+            c["model"] = _model
+            _save_convos(ctx)
+            return
+    _convos.insert(0, {"slug": _slug, "title": title, "model": _model})
+    _save_convos(ctx)
+
+
+# ── ui helpers ────────────────────────────────────────────────────
+
+def _wrap(text, w):
+    out = []
+    for para in text.split('\n'):
+        while len(para) > w:
+            brk = para.rfind(' ', 0, w + 1)
+            if brk <= 0:
+                brk = w
+            out.append(para[:brk])
+            para = para[brk:].lstrip()
+        out.append(para)
+    return out
+
+
+def _draw_chat(ctx):
+    global _dirty
+    _dirty = False
+    d = ctx.display
+    d.clear()
+    d.fill_rect(0, 0, 320, _MSG_Y0, d.DARK_GRAY)
+    d.text(2, 1, _model[:50], d.LIGHT_GRAY, _FONT)
+
+    lines = []
+    for msg in _msgs:
+        pfx = "You: " if msg["role"] == "user" else "AI: "
+        color = d.WHITE if msg["role"] == "user" else d.CYAN
+        for ln in _wrap(pfx + msg["content"], _MAX_CHARS):
+            lines.append((ln, color))
+        lines.append(("", 0))
+
+    total = len(lines)
+    if total <= _MSG_LINES:
+        start = 0
+    else:
+        start = max(0, total - _MSG_LINES - _scroll)
+
+    y = _MSG_Y0
+    end = min(start + _MSG_LINES, total)
+    for i in range(start, end):
+        t, c = lines[i]
+        if t:
+            d.text(2, y, t, c, _FONT)
+        y += 8
+
+    d.fill_rect(0, 300, 320, 20, d.DARK_GRAY)
+    d.text(2, 306, "ENTER:msg UP/DN:scroll ESC:back", d.LIGHT_GRAY, _FONT)
+    d.swap()
+
+
+def _show_status(ctx, msg):
+    d = ctx.display
+    d.clear()
+    d.text(10, 150, msg, d.WHITE, _FONT)
+    d.swap()
+
+
+# ── api ───────────────────────────────────────────────────────────
+
+def _hdrs():
+    return {
+        "Authorization": "Bearer " + _cfg["api_key"],
+        "Content-Type": "application/json",
+    }
+
+
+def _fetch_models(ctx):
+    from picoware.net.http import http_get
+    from json import loads
+    body, _ = http_get(_API_HOST, "/api/models", headers=_hdrs())
+    collect()
+    data = loads(body)
+    del body
+    collect()
+    models = []
+    for m in data.get("data", []):
+        mid = m.get("id", "")
+        if mid:
+            models.append(mid)
+    del data
+    collect()
+    return models
+
+
+def _send_msg(ctx, text):
+    global _dirty, _scroll
+    _msgs.append({"role": "user", "content": text})
+    _msgs.append({"role": "assistant", "content": ""})
+    _scroll = 0
+    _draw_chat(ctx)
+
+    from json import dumps, loads
+    from picoware.net.http import http_post, http_readline
+
+    api_msgs = _msgs[:-1]
+    if len(api_msgs) > 20:
+        api_msgs = api_msgs[-20:]
+    body = dumps({"model": _model, "messages": api_msgs, "stream": True})
+    del api_msgs
+    collect()
+
+    try:
+        sock, status = http_post(
+            _API_HOST, "/api/chat/completions",
+            body=body, headers=_hdrs(), stream=True
+        )
+        del body
+        collect()
+    except Exception as e:
+        _msgs[-1]["content"] = "[Error: " + str(e) + "]"
+        _dirty = True
+        return
+
+    if status != 200:
+        _msgs[-1]["content"] = "[HTTP " + str(status) + "]"
+        try:
+            sock.close()
+        except:
+            pass
+        _dirty = True
+        return
+
+    try:
+        sock.settimeout(120)
+        while True:
+            line = http_readline(sock)
+            if not line:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            if line == b"data: [DONE]":
+                break
+            if line.startswith(b"data: "):
+                try:
+                    chunk = loads(line[6:])
+                    delta = chunk["choices"][0]["delta"]
+                    content = delta.get("content", "")
+                    if content:
+                        _msgs[-1]["content"] += content
+                        _draw_chat(ctx)
+                except:
+                    pass
+    except Exception as e:
+        if not _msgs[-1]["content"]:
+            _msgs[-1]["content"] = "[Stream error: " + str(e) + "]"
+    finally:
+        try:
+            sock.close()
+        except:
+            pass
+
+    collect()
+    _save_chat(ctx)
+    _update_index(ctx)
+    _dirty = True
+
+
+# ── lifecycle ─────────────────────────────────────────────────────
+
+def start(ctx):
+    global _state, _dirty, _menu
+    _load_cfg(ctx)
+    _load_convos(ctx)
+    _state = _ST_SETUP if not _cfg["api_key"] else _ST_CONVOS
+    _menu = None
+    _dirty = True
+    return True
+
+
+def run(ctx):
+    global _state, _menu, _dirty, _scroll, _model, _slug, _msgs
+
+    k = ctx.input.key
+
+    # ── setup: prompt for API key ──
+    if _state == _ST_SETUP:
+        from picoware.ui.dialog import text_input
+        key = text_input(ctx.display, ctx.input, title="API Key",
+                         initial=_cfg.get("api_key", ""))
+        if key:
+            _cfg["api_key"] = key
+            _save_cfg(ctx)
+            _state = _ST_CONVOS
+            _menu = None
+            _dirty = True
+        else:
+            ctx.back()
+        return
+
+    # ── conversation list ──
+    if _state == _ST_CONVOS:
+        if _menu is None:
+            items = ["+ New Chat"] + [c.get("title", "?") for c in _convos]
+            from picoware.ui.menu import Menu
+            _menu = Menu(ctx.display, items, title="AI Chat")
+            _dirty = True
+        if k != -1:
+            if k == KEY_F10:
+                _state = _ST_SETTINGS
+                _menu = None
+                _dirty = True
+                return
+            r = _menu.handle_input(k)
+            if r == -1:
+                ctx.back()
+                return
+            if r is not None:
+                if r == 0:
+                    _state = _ST_MODEL
+                    _menu = None
+                    _dirty = True
+                else:
+                    _load_chat(ctx, _convos[r - 1]["slug"])
+                    _state = _ST_CHAT
+                    _menu = None
+                    _scroll = 0
+                    _dirty = True
+                return
+        if _dirty:
+            _menu.draw(force=True)
+            _dirty = False
+        return
+
+    # ── model selection ──
+    if _state == _ST_MODEL:
+        if _menu is None:
+            if not ctx.wifi or not ctx.wifi.is_connected:
+                from picoware.ui.dialog import alert
+                alert(ctx.display, ctx.input, "WiFi not connected")
+                _state = _ST_CONVOS
+                _menu = None
+                _dirty = True
+                return
+            _show_status(ctx, "Loading models...")
+            try:
+                models = _fetch_models(ctx)
+            except Exception as e:
+                from picoware.ui.dialog import alert
+                alert(ctx.display, ctx.input, str(e), title="Error")
+                _state = _ST_CONVOS
+                _menu = None
+                _dirty = True
+                return
+            if not models:
+                from picoware.ui.dialog import alert
+                alert(ctx.display, ctx.input, "No models available")
+                _state = _ST_CONVOS
+                _menu = None
+                _dirty = True
+                return
+            from picoware.ui.menu import Menu
+            _menu = Menu(ctx.display, models, title="Select Model")
+            _dirty = True
+        if k != -1:
+            r = _menu.handle_input(k)
+            if r == -1:
+                _state = _ST_CONVOS
+                _menu = None
+                _dirty = True
+                return
+            if r is not None:
+                _model = _menu.selected_item
+                from utime import ticks_ms
+                _slug = str(ticks_ms())
+                _msgs = []
+                _scroll = 0
+                _state = _ST_CHAT
+                _menu = None
+                _dirty = True
+                return
+        if _dirty:
+            _menu.draw(force=True)
+            _dirty = False
+        return
+
+    # ── chat view ──
+    if _state == _ST_CHAT:
+        if k == KEY_ENTER:
+            from picoware.ui.dialog import text_input
+            text = text_input(ctx.display, ctx.input, title="Message")
+            if text:
+                if not ctx.wifi or not ctx.wifi.is_connected:
+                    from picoware.ui.dialog import alert
+                    alert(ctx.display, ctx.input, "WiFi not connected")
+                else:
+                    _send_msg(ctx, text)
+            _dirty = True
+            return
+        if k == KEY_UP:
+            _scroll += 3
+            _dirty = True
+            return
+        if k == KEY_DOWN:
+            _scroll = max(0, _scroll - 3)
+            _dirty = True
+            return
+        if k == KEY_ESC or k == KEY_BACKSPACE:
+            _save_chat(ctx)
+            _update_index(ctx)
+            _state = _ST_CONVOS
+            _menu = None
+            _dirty = True
+            return
+        if k == KEY_F1:
+            _save_chat(ctx)
+            _update_index(ctx)
+            _state = _ST_MODEL
+            _menu = None
+            _dirty = True
+            return
+        if _dirty:
+            _draw_chat(ctx)
+        return
+
+    # ── settings ──
+    if _state == _ST_SETTINGS:
+        if _menu is None:
+            from picoware.ui.menu import Menu
+            _menu = Menu(ctx.display,
+                         ["Edit API Key", "Clear History", "Back"],
+                         title="Settings")
+            _dirty = True
+        if k != -1:
+            r = _menu.handle_input(k)
+            if r == -1 or r == 2:
+                _state = _ST_CONVOS
+                _menu = None
+                _dirty = True
+                return
+            if r == 0:
+                from picoware.ui.dialog import text_input
+                key = text_input(ctx.display, ctx.input, title="API Key",
+                                 initial=_cfg.get("api_key", ""))
+                if key is not None:
+                    _cfg["api_key"] = key
+                    _save_cfg(ctx)
+                _dirty = True
+                return
+            if r == 1:
+                from picoware.ui.dialog import confirm
+                if confirm(ctx.display, ctx.input, "Delete all conversations?"):
+                    _convos.clear()
+                    _save_convos(ctx)
+                _state = _ST_CONVOS
+                _menu = None
+                _dirty = True
+                return
+        if _dirty:
+            _menu.draw(force=True)
+            _dirty = False
+
+
+def stop(ctx):
+    global _state, _cfg, _convos, _menu, _msgs, _model, _slug, _scroll, _dirty
+    _state = _ST_CONVOS
+    _cfg = None
+    _convos = []
+    _menu = None
+    _msgs = []
+    _model = ""
+    _slug = ""
+    _scroll = 0
+    _dirty = True
+    collect()
