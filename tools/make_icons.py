@@ -8,7 +8,6 @@ Produces:
 Requires: pip install Pillow
 """
 import math
-import struct
 from pathlib import Path
 
 try:
@@ -20,6 +19,28 @@ except ImportError:
 ICON_SIZE = 48
 MAGIC = 0x49
 ROOT = Path(__file__).resolve().parent.parent
+
+# Color palette (RGB tuples)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+GRAY = (128, 128, 128)
+LIGHT_GRAY = (192, 192, 192)
+DARK_GRAY = (64, 64, 64)
+
+BLUE = (40, 120, 255)
+DARK_BLUE = (20, 60, 160)
+LIGHT_BLUE = (100, 180, 255)
+CYAN = (0, 220, 220)
+
+GREEN = (40, 200, 80)
+DARK_GREEN = (20, 120, 40)
+LIGHT_GREEN = (120, 255, 120)
+
+RED = (220, 40, 40)
+ORANGE = (240, 160, 40)
+YELLOW = (240, 240, 40)
+PURPLE = (160, 80, 220)
+PINK = (240, 120, 180)
 
 
 def rgb_to_rgb332(r, g, b):
@@ -37,9 +58,9 @@ def image_to_raw(img):
     return bytes([MAGIC, ICON_SIZE, ICON_SIZE, 0x00]) + bytes(pixels)
 
 
-def new_icon():
-    """Create a new black 48x48 image with draw context."""
-    img = Image.new("RGB", (ICON_SIZE, ICON_SIZE), (0, 0, 0))
+def new_icon(bg=BLACK):
+    """Create a new 48x48 image with draw context."""
+    img = Image.new("RGB", (ICON_SIZE, ICON_SIZE), bg)
     draw = ImageDraw.Draw(img)
     return img, draw
 
@@ -47,135 +68,258 @@ def new_icon():
 # --- Built-in icon designs ---
 
 def make_settings_icon():
-    """Gear/cog icon."""
+    """Gear/cog with metallic look."""
     img, draw = new_icon()
     cx, cy = 24, 24
-    # Outer gear teeth
+
+    # Gear body
     teeth = 8
-    outer_r = 20
-    inner_r = 14
-    tooth_half = math.pi / teeth / 2
+    outer_r = 21
+    inner_r = 15
+    tooth_half = math.pi / teeth / 2.2
+
     points = []
     for i in range(teeth):
-        angle = 2 * math.pi * i / teeth
-        # Outer tooth
+        angle = 2 * math.pi * i / teeth - math.pi / 2
         for da in [-tooth_half, tooth_half]:
             a = angle + da
             points.append((cx + outer_r * math.cos(a), cy + outer_r * math.sin(a)))
-        # Inner gap
         gap_angle = angle + math.pi / teeth
         for da in [-tooth_half, tooth_half]:
             a = gap_angle + da
             points.append((cx + inner_r * math.cos(a), cy + inner_r * math.sin(a)))
-    draw.polygon(points, fill=(255, 255, 255))
+
+    draw.polygon(points, fill=LIGHT_GRAY)
+    # Inner ring highlight
+    draw.ellipse([cx - 12, cy - 12, cx + 12, cy + 12], fill=GRAY)
+    draw.ellipse([cx - 10, cy - 10, cx + 10, cy + 10], fill=LIGHT_GRAY)
     # Center hole
-    draw.ellipse([cx - 7, cy - 7, cx + 7, cy + 7], fill=(0, 0, 0))
+    draw.ellipse([cx - 6, cy - 6, cx + 6, cy + 6], fill=DARK_GRAY)
+    draw.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=BLACK)
     return img
 
 
 def make_appstore_icon():
-    """Download arrow in box."""
+    """Shopping bag with down arrow."""
     img, draw = new_icon()
-    # Box outline
-    draw.rectangle([8, 8, 39, 39], outline=(255, 255, 255), width=2)
-    # Arrow shaft
-    draw.rectangle([21, 14, 26, 28], fill=(255, 255, 255))
-    # Arrow head
-    draw.polygon([(14, 28), (24, 38), (34, 28)], fill=(255, 255, 255))
-    # Bottom line (tray)
-    draw.rectangle([10, 36, 37, 38], fill=(255, 255, 255))
+
+    # Bag body
+    draw.rounded_rectangle([8, 14, 39, 42], radius=4, fill=BLUE)
+    draw.rounded_rectangle([10, 16, 37, 40], radius=3, fill=DARK_BLUE)
+
+    # Bag handle
+    draw.arc([16, 4, 31, 20], start=180, end=360, fill=LIGHT_BLUE, width=3)
+
+    # Down arrow
+    draw.rectangle([21, 22, 26, 32], fill=WHITE)
+    draw.polygon([(15, 32), (24, 40), (33, 32)], fill=WHITE)
     return img
 
 
 def make_poweroff_icon():
-    """Power symbol (circle + line)."""
+    """Power symbol — red accent."""
     img, draw = new_icon()
-    cx, cy = 24, 24
-    # Circle (arc with gap at top)
-    draw.arc([8, 8, 40, 40], start=40, end=320, fill=(255, 255, 255), width=3)
+    cx, cy = 24, 25
+
+    # Outer glow circle
+    draw.ellipse([6, 7, 42, 43], fill=DARK_GRAY)
+    draw.ellipse([8, 9, 40, 41], fill=BLACK)
+
+    # Power arc
+    draw.arc([10, 11, 38, 39], start=35, end=325, fill=RED, width=3)
+
     # Vertical line
-    draw.rectangle([22, 6, 26, 24], fill=(255, 255, 255))
+    draw.rectangle([22, 9, 26, 25], fill=RED)
+
     return img
 
 
 def make_chat_icon():
-    """Speech bubble."""
+    """AI chat — speech bubble with sparkle/brain motif."""
     img, draw = new_icon()
-    # Bubble body
-    draw.rounded_rectangle([4, 6, 43, 32], radius=6, fill=(255, 255, 255))
+
+    # Main bubble
+    draw.rounded_rectangle([2, 4, 45, 34], radius=8, fill=PURPLE)
+    draw.rounded_rectangle([4, 6, 43, 32], radius=7, fill=(120, 60, 180))
+
     # Tail
-    draw.polygon([(10, 32), (16, 32), (8, 42)], fill=(255, 255, 255))
-    # Dots for text
-    for x in [15, 24, 33]:
-        draw.ellipse([x - 2, 17, x + 2, 21], fill=(0, 0, 0))
+    draw.polygon([(8, 33), (16, 33), (6, 43)], fill=(120, 60, 180))
+
+    # AI sparkle — three dots connected
+    draw.ellipse([12, 15, 18, 21], fill=CYAN)
+    draw.ellipse([21, 13, 27, 19], fill=WHITE)
+    draw.ellipse([30, 15, 36, 21], fill=CYAN)
+    # connecting lines
+    draw.line([(15, 18), (24, 16)], fill=LIGHT_BLUE, width=1)
+    draw.line([(24, 16), (33, 18)], fill=LIGHT_BLUE, width=1)
+    # small sparkle dots
+    draw.ellipse([17, 24, 19, 26], fill=LIGHT_BLUE)
+    draw.ellipse([23, 22, 25, 24], fill=WHITE)
+    draw.ellipse([29, 24, 31, 26], fill=LIGHT_BLUE)
+
     return img
 
 
 def make_graphcalc_icon():
-    """Axes + sine wave."""
+    """Graph calculator — colored axes with sine + parabola."""
     img, draw = new_icon()
+
+    # Grid background
+    for gx in range(10, 44, 8):
+        draw.line([(gx, 4), (gx, 42)], fill=DARK_GRAY, width=1)
+    for gy in range(6, 44, 8):
+        draw.line([(8, gy), (42, gy)], fill=DARK_GRAY, width=1)
+
     # Y axis
-    draw.line([(10, 6), (10, 42)], fill=(255, 255, 255), width=2)
+    draw.line([(10, 4), (10, 44)], fill=WHITE, width=2)
     # X axis
-    draw.line([(6, 38), (42, 38)], fill=(255, 255, 255), width=2)
-    # Sine wave
+    draw.line([(6, 38), (44, 38)], fill=WHITE, width=2)
+
+    # Sine wave (cyan)
     points = []
-    for px in range(12, 42):
-        t = (px - 12) / 30.0 * 2 * math.pi
-        sy = 24 - int(12 * math.sin(t))
+    for px in range(11, 43):
+        t = (px - 11) / 32.0 * 2.5 * math.pi
+        sy = 26 - int(10 * math.sin(t))
         points.append((px, sy))
     if len(points) > 1:
-        draw.line(points, fill=(255, 255, 255), width=2)
+        draw.line(points, fill=CYAN, width=2)
+
+    # Parabola (orange)
+    points2 = []
+    for px in range(11, 43):
+        t = (px - 27) / 16.0
+        sy = 36 - int(14 * (1 - t * t))
+        if 4 <= sy <= 42:
+            points2.append((px, sy))
+    if len(points2) > 1:
+        draw.line(points2, fill=ORANGE, width=2)
+
+    # Axis arrows
+    draw.polygon([(10, 4), (7, 8), (13, 8)], fill=WHITE)
+    draw.polygon([(44, 38), (40, 35), (40, 41)], fill=WHITE)
+
     return img
 
 
 def make_hello_world_icon():
-    """Star."""
+    """Hello World — globe with grid lines."""
     img, draw = new_icon()
     cx, cy = 24, 24
-    points = []
-    for i in range(5):
-        # Outer point
-        a = math.pi / 2 + 2 * math.pi * i / 5
-        points.append((cx + 18 * math.cos(a), cy - 18 * math.sin(a)))
-        # Inner point
-        a2 = a + math.pi / 5
-        points.append((cx + 8 * math.cos(a2), cy - 8 * math.sin(a2)))
-    draw.polygon(points, fill=(255, 255, 255))
+
+    # Globe body
+    draw.ellipse([4, 4, 43, 43], fill=DARK_BLUE)
+    draw.ellipse([6, 6, 41, 41], fill=BLUE)
+
+    # Continent-like blobs
+    draw.ellipse([14, 10, 26, 22], fill=GREEN)
+    draw.ellipse([22, 16, 36, 30], fill=GREEN)
+    draw.ellipse([10, 26, 22, 36], fill=GREEN)
+    draw.ellipse([28, 30, 38, 38], fill=DARK_GREEN)
+
+    # Latitude lines
+    for offset in [-10, 0, 10]:
+        y = cy + offset
+        # clip to circle
+        if abs(offset) < 18:
+            half_w = int(math.sqrt(max(0, 18**2 - offset**2)))
+            draw.arc(
+                [cx - half_w, y - 2, cx + half_w, y + 2],
+                start=0, end=360, fill=(80, 160, 255), width=1
+            )
+
+    # Center meridian (elliptical)
+    draw.ellipse([18, 5, 30, 42], outline=(80, 160, 255), width=1)
+
+    # Shine highlight
+    draw.ellipse([12, 8, 20, 16], fill=(120, 200, 255))
+
     return img
 
 
 def make_snake_icon():
-    """Snake body segments."""
+    """Snake — coiled green snake with eyes and tongue."""
     img, draw = new_icon()
-    seg = 6
-    # Snake body: zigzag segments
-    segments = [
-        (8, 12), (14, 12), (20, 12), (26, 12), (32, 12),
-        (32, 18), (32, 24), (26, 24), (20, 24), (14, 24),
-        (14, 30), (14, 36), (20, 36), (26, 36), (32, 36),
+
+    # Snake body — thick curved path
+    body_color = GREEN
+    body_dark = DARK_GREEN
+    body_light = LIGHT_GREEN
+
+    # Body segments as a winding path
+    seg = 7
+    path = [
+        (6, 10), (13, 10), (20, 10), (27, 10), (34, 10),
+        (34, 17), (34, 24),
+        (27, 24), (20, 24), (13, 24),
+        (13, 31),
+        (20, 31), (27, 31), (34, 31),
+        (34, 38),
+        (27, 38),
     ]
-    for x, y in segments:
-        draw.rectangle([x, y, x + seg - 1, y + seg - 1], fill=(255, 255, 255))
-    # Head (last segment is slightly different)
-    hx, hy = segments[-1]
-    draw.rectangle([hx, hy, hx + seg - 1, hy + seg - 1], fill=(255, 255, 255))
-    # Eye
-    draw.rectangle([hx + 4, hy + 1, hx + 5, hy + 2], fill=(0, 0, 0))
+
+    for i, (x, y) in enumerate(path):
+        c = body_light if i % 3 == 0 else (body_color if i % 3 == 1 else body_dark)
+        draw.rounded_rectangle([x, y, x + seg - 1, y + seg - 1], radius=2, fill=c)
+
+    # Head
+    hx, hy = path[-1]
+    draw.rounded_rectangle([hx - 1, hy - 1, hx + seg, hy + seg], radius=3, fill=LIGHT_GREEN)
+
+    # Eyes
+    draw.ellipse([hx + 1, hy + 1, hx + 3, hy + 3], fill=WHITE)
+    draw.ellipse([hx + 1, hy + 1, hx + 2, hy + 2], fill=BLACK)
+    draw.ellipse([hx + 4, hy + 1, hx + 6, hy + 3], fill=WHITE)
+    draw.ellipse([hx + 5, hy + 1, hx + 6, hy + 2], fill=BLACK)
+
+    # Tongue
+    draw.line([(hx + 3, hy + seg), (hx + 3, hy + seg + 3)], fill=RED, width=1)
+    draw.line([(hx + 3, hy + seg + 3), (hx + 1, hy + seg + 5)], fill=RED, width=1)
+    draw.line([(hx + 3, hy + seg + 3), (hx + 5, hy + seg + 5)], fill=RED, width=1)
+
+    # Apple food item in top-right
+    draw.ellipse([38, 4, 45, 11], fill=RED)
+    draw.line([(41, 3), (43, 1)], fill=GREEN, width=1)
+
     return img
 
 
 def make_ssh_icon():
-    """>_ terminal prompt."""
+    """SSH Terminal — detailed terminal window with colored text."""
     img, draw = new_icon()
-    # Terminal box
-    draw.rounded_rectangle([4, 6, 43, 41], radius=4, outline=(255, 255, 255), width=2)
+
+    # Window chrome
+    draw.rounded_rectangle([2, 3, 45, 44], radius=4, fill=DARK_GRAY)
+
     # Title bar
-    draw.rectangle([4, 6, 43, 14], fill=(255, 255, 255))
-    # > prompt
-    draw.line([(10, 22), (18, 27), (10, 32)], fill=(255, 255, 255), width=2)
-    # _ cursor
-    draw.line([(22, 32), (32, 32)], fill=(255, 255, 255), width=2)
+    draw.rounded_rectangle([2, 3, 45, 13], radius=4, fill=GRAY)
+    draw.rectangle([2, 10, 45, 13], fill=GRAY)
+
+    # Traffic light dots
+    draw.ellipse([5, 5, 9, 9], fill=RED)
+    draw.ellipse([12, 5, 16, 9], fill=YELLOW)
+    draw.ellipse([19, 5, 23, 9], fill=GREEN)
+
+    # Terminal background
+    draw.rectangle([4, 14, 43, 42], fill=(15, 15, 30))
+
+    # Prompt line 1: $ ssh user@host
+    draw.rectangle([6, 16, 8, 18], fill=GREEN)  # $
+    draw.rectangle([10, 16, 28, 18], fill=CYAN)  # command text
+    draw.rectangle([30, 16, 42, 18], fill=WHITE)  # args
+
+    # Prompt line 2: Connected
+    draw.rectangle([6, 22, 32, 24], fill=GREEN)  # success text
+
+    # Prompt line 3: user@remote:~$
+    draw.rectangle([6, 28, 24, 30], fill=CYAN)  # prompt
+    draw.rectangle([26, 28, 28, 30], fill=WHITE)  # $
+
+    # Blinking cursor
+    draw.rectangle([30, 28, 32, 30], fill=LIGHT_GREEN)
+
+    # Prompt line 4: partial command
+    draw.rectangle([6, 34, 18, 36], fill=GRAY)
+
     return img
 
 
