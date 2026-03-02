@@ -73,7 +73,7 @@ class Menu:
             return
 
         d = self._display
-        d.clear()
+        d.fill_rect(self._x, self._y, self._w, self._h, d.bg)
 
         y = self._y
 
