@@ -33,12 +33,15 @@ _ST_SETTINGS = const(3)
 _ST_NOLORA = const(4)
 
 _DATA_DIR = "picoware/data/meshtastic"
-_MAX_CHARS = const(63)       # characters per line at FONT_8
-_MSG_Y0 = const(10)          # top of message area (below header)
-_MSG_LINES = const(33)       # number of visible message lines
-_INPUT_Y = const(276)
-_HINT_Y = const(290)
 _FONT = const(0)             # FONT_8
+_LINE_H = const(8)           # FONT_8 line height
+
+# Layout — recomputed from display size in start()
+_MAX_CHARS = 63
+_MSG_Y0 = 10                 # top of message area (below header)
+_MSG_LINES = 33              # number of visible message lines
+_INPUT_Y = 276
+_HINT_Y = 290
 
 _MAX_MSG_HISTORY = const(200)
 _NODE_STALE_S = const(3600)  # drop nodes unseen for 1 hour
@@ -245,7 +248,7 @@ def _draw_chat(ctx):
     d.clear()
 
     # header: channel + node count
-    d.fill_rect(0, 0, d.w if hasattr(d, 'w') else 320, _MSG_Y0, DARK_GRAY)
+    d.fill_rect(0, 0, d.w, _MSG_Y0, DARK_GRAY)
     header = "#{} {}  nodes:{}".format(
         _current_channel, _current_channel_name(), len(_nodes),
     )
@@ -284,15 +287,15 @@ def _draw_chat(ctx):
         y += 8
 
     # input bar
-    d.fill_rect(0, _INPUT_Y, d.w if hasattr(d, 'w') else 320, 12, DARK_GRAY)
+    d.fill_rect(0, _INPUT_Y, d.w, 12, DARK_GRAY)
     inp = "> " + "".join(_input_buf)
     d.text(2, _INPUT_Y + 2, inp[:_MAX_CHARS], WHITE, _FONT)
     cx = 2 + (_input_cur + 2) * 5
-    if cx < (d.w if hasattr(d, 'w') else 320) - 2:
+    if cx < d.w - 2:
         d.fill_rect(cx, _INPUT_Y + 2, 1, 8, WHITE)
 
     # hint bar
-    d.fill_rect(0, _HINT_Y, d.w if hasattr(d, 'w') else 320, 30, DARK_GRAY)
+    d.fill_rect(0, _HINT_Y, d.w, 30, DARK_GRAY)
     d.text(2, _HINT_Y + 2, "ENTER:send F1:chan F2:nodes F10:cfg ESC:exit",
            LIGHT_GRAY, _FONT)
     d.swap()
@@ -303,10 +306,8 @@ def _draw_nodes(ctx):
     _dirty = False
     d = ctx.display
     d.clear()
-    w = d.w if hasattr(d, 'w') else 320
-    h = d.h if hasattr(d, 'h') else 320
 
-    d.fill_rect(0, 0, w, _MSG_Y0, DARK_GRAY)
+    d.fill_rect(0, 0, d.w, _MSG_Y0, DARK_GRAY)
     d.text(2, 1, "Nodes ({})   F2:back".format(len(_nodes)), LIGHT_GRAY, _FONT)
 
     from utime import time
@@ -317,7 +318,7 @@ def _draw_nodes(ctx):
     else:
         items = sorted(_nodes.items(), key=lambda kv: -kv[1].get("last_seen", 0))
         for nid, info in items:
-            if y > h - 10:
+            if y > d.h - 10:
                 break
             age = now - info.get("last_seen", now)
             short = info.get("short") or str(nid)[-4:]
@@ -337,7 +338,7 @@ def _show_status(ctx, title, message):
     d = ctx.display
     d.clear()
     fh = d.font_height()
-    d.fill_rect(0, 0, d.w if hasattr(d, 'w') else 320, fh + 10, d.fg)
+    d.fill_rect(0, 0, d.w, fh + 10, d.fg)
     d.text(4, 5, title, d.bg)
     d.text(10, fh + 30, message, d.fg)
     d.text(10, fh + 50, "Press ESC to return", d.fg)
@@ -348,6 +349,13 @@ def _show_status(ctx, title, message):
 
 def start(ctx):
     global _state, _dirty, _menu, _msgs, _nodes, _current_channel
+    global _MAX_CHARS, _MSG_Y0, _MSG_LINES, _INPUT_Y, _HINT_Y
+    d = ctx.display
+    _MAX_CHARS = d.w // 5 - 1  # FONT_8 char width = 5
+    _MSG_Y0 = 10
+    _INPUT_Y = d.h - 44
+    _HINT_Y = d.h - 30
+    _MSG_LINES = (_INPUT_Y - _MSG_Y0) // _LINE_H
     _load_cfg(ctx)
     _load_history(ctx)
     _nodes = {}

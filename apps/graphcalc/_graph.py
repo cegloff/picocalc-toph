@@ -3,11 +3,19 @@
 import math
 from gc import collect
 
-# Layout
+# Layout — set by main.start(ctx) via set_layout()
+_W = 320
 _SB_H = 10
 _CONTENT_Y = 10
 _CONTENT_H = 274
 _ENTRY_Y = 284
+
+
+def set_layout(w, content_h, entry_y):
+    global _W, _CONTENT_H, _ENTRY_Y
+    _W = w
+    _CONTENT_H = content_h
+    _ENTRY_Y = entry_y
 
 # Colors (loaded lazily)
 _COLORS = None
@@ -25,7 +33,7 @@ def _get_colors():
 
 def _x_to_px(x, S):
     xmin, xmax = S["xmin"], S["xmax"]
-    return int((x - xmin) / (xmax - xmin) * 319)
+    return int((x - xmin) / (xmax - xmin) * (_W - 1))
 
 
 def _y_to_py(y, S):
@@ -35,7 +43,7 @@ def _y_to_py(y, S):
 
 def _px_to_x(px, S):
     xmin, xmax = S["xmin"], S["xmax"]
-    return xmin + px * (xmax - xmin) / 319
+    return xmin + px * (xmax - xmin) / (_W - 1)
 
 
 # --- Y= Editor ---
@@ -82,11 +90,11 @@ def draw_yedit(d, S):
 def _draw_slot(d, y, label, selected, color, fh):
     from picoware.core.display import FONT_12
     cw = 7
-    max_c = 310 // cw
+    max_c = (_W - 10) // cw
     if len(label) > max_c:
         label = label[:max_c - 1] + "~"
     if selected:
-        d.fill_rect(0, y, 320, fh + 4, d.fg)
+        d.fill_rect(0, y, _W, fh + 4, d.fg)
         d.text(4, y + 2, label, d.bg, FONT_12)
     else:
         d.text(4, y + 2, label, color, FONT_12)
@@ -214,7 +222,7 @@ def draw_window(d, S):
         val = S.get(key, 0)
         line = "%s = %s" % (label, _fmt(val))
         if i == sel:
-            d.fill_rect(0, y, 320, fh + 4, d.fg)
+            d.fill_rect(0, y, _W, fh + 4, d.fg)
             d.text(4, y + 2, line, d.bg, FONT_12)
         else:
             d.text(4, y + 2, line, d.fg, FONT_12)
@@ -316,11 +324,11 @@ def _draw_axes(d, S):
     if ymin <= 0 <= ymax:
         ay = _y_to_py(0, S)
         if _CONTENT_Y <= ay < _CONTENT_Y + _CONTENT_H:
-            d.hline(0, ay, 320, GRAY)
+            d.hline(0, ay, _W, GRAY)
     # Y axis
     if xmin <= 0 <= xmax:
         ax = _x_to_px(0, S)
-        if 0 <= ax < 320:
+        if 0 <= ax < _W:
             d.line(ax, _CONTENT_Y, ax, _CONTENT_Y + _CONTENT_H - 1, GRAY)
 
     # Tick marks
@@ -332,7 +340,7 @@ def _draw_axes(d, S):
         tx = math.ceil(xmin / xscl) * xscl
         while tx <= xmax:
             px = _x_to_px(tx, S)
-            if 0 <= px < 320:
+            if 0 <= px < _W:
                 d.line(px, ay - 2, px, ay + 2, GRAY)
             tx += xscl
 
@@ -357,7 +365,7 @@ def _plot_func(d, S, env, colors):
             continue
         color = colors[fi % len(colors)]
         prev_py = None
-        for px in range(320):
+        for px in range(_W):
             x = _px_to_x(px, S)
             env["x"] = x
             try:
@@ -418,7 +426,7 @@ def _plot_par(d, S, env, colors):
                 continue
             spx = _x_to_px(x, S)
             spy = _y_to_py(y, S)
-            if 0 <= spx < 320 and _CONTENT_Y <= spy < _CONTENT_Y + _CONTENT_H:
+            if 0 <= spx < _W and _CONTENT_Y <= spy < _CONTENT_Y + _CONTENT_H:
                 if prev_px is not None:
                     d.line(prev_px, prev_py, spx, spy, color)
                 else:
@@ -462,7 +470,7 @@ def _plot_pol(d, S, env, colors):
             y = r * math.sin(th)
             spx = _x_to_px(x, S)
             spy = _y_to_py(y, S)
-            if 0 <= spx < 320 and _CONTENT_Y <= spy < _CONTENT_Y + _CONTENT_H:
+            if 0 <= spx < _W and _CONTENT_Y <= spy < _CONTENT_Y + _CONTENT_H:
                 if prev_px is not None:
                     d.line(prev_px, prev_py, spx, spy, color)
                 else:
@@ -494,7 +502,7 @@ def _draw_trace(d, S, env, colors):
             return
         spx = _x_to_px(tx, S)
         spy = _y_to_py(yv, S)
-        if 0 <= spx < 320 and _CONTENT_Y <= spy < _CONTENT_Y + _CONTENT_H:
+        if 0 <= spx < _W and _CONTENT_Y <= spy < _CONTENT_Y + _CONTENT_H:
             color = colors[tfi % len(colors)]
             d.circle(spx, spy, 3, color)
             d.circle(spx, spy, 4, color)
@@ -622,7 +630,7 @@ def zoom_fit(S):
             code = compile(expr, "<e>", "eval")
         except Exception:
             continue
-        for px in range(0, 320, 4):
+        for px in range(0, _W, 4):
             x = _px_to_x(px, S)
             env["x"] = x
             try:
@@ -648,8 +656,8 @@ def zoom_sqr(S):
     xr = S["xmax"] - S["xmin"]
     yr = S["ymax"] - S["ymin"]
     # Adjust to make pixel aspect ratio 1:1
-    # content area is 320 wide x _CONTENT_H tall
-    aspect = 320 / _CONTENT_H
+    # content area is _W wide x _CONTENT_H tall
+    aspect = _W / _CONTENT_H
     if xr / yr > aspect:
         # x range too wide, expand y
         new_yr = xr / aspect

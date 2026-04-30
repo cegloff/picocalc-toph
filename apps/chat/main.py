@@ -19,12 +19,15 @@ _ST_TOOLS = const(5)
 
 _DATA_DIR = "picoware/data/chat"
 _API_HOST = "bots.egloff.tech"
-_MAX_CHARS = const(63)
-_MSG_Y0 = const(10)
-_MSG_LINES = const(33)
-_INPUT_Y = const(276)
-_HINT_Y = const(290)
 _FONT = const(0)
+_LINE_H = const(8)  # FONT_8 line height
+
+# Layout — recomputed from display size in start()
+_MAX_CHARS = 63
+_MSG_Y0 = 10
+_MSG_LINES = 33
+_INPUT_Y = 276
+_HINT_Y = 290
 
 _state = _ST_CONVOS
 _cfg = None
@@ -139,7 +142,7 @@ def _draw_chat(ctx):
     _dirty = False
     d = ctx.display
     d.clear()
-    d.fill_rect(0, 0, 320, _MSG_Y0, DARK_GRAY)
+    d.fill_rect(0, 0, d.w, _MSG_Y0, DARK_GRAY)
     _tc = len(_enabled_tools) + len(_enabled_features)
     label = _model[:50]
     if _tc:
@@ -169,16 +172,16 @@ def _draw_chat(ctx):
         y += 8
 
     # input bar
-    d.fill_rect(0, _INPUT_Y, 320, 12, DARK_GRAY)
+    d.fill_rect(0, _INPUT_Y, d.w, 12, DARK_GRAY)
     inp = "> " + "".join(_input_buf)
     d.text(2, _INPUT_Y + 2, inp[:_MAX_CHARS], WHITE, _FONT)
     # blinking cursor
     cx = 2 + (_input_cur + 2) * 5
-    if cx < 318:
+    if cx < d.w - 2:
         d.fill_rect(cx, _INPUT_Y + 2, 1, 8, WHITE)
 
     # hint bar
-    d.fill_rect(0, _HINT_Y, 320, 30, DARK_GRAY)
+    d.fill_rect(0, _HINT_Y, d.w, 30, DARK_GRAY)
     d.text(2, _HINT_Y + 2, "ENTER:send ^/v:scroll F2:tools ESC:back", LIGHT_GRAY, _FONT)
     d.swap()
 
@@ -326,6 +329,13 @@ def _send_msg(ctx, text):
 
 def start(ctx):
     global _state, _dirty, _menu
+    global _MAX_CHARS, _MSG_Y0, _MSG_LINES, _INPUT_Y, _HINT_Y
+    d = ctx.display
+    _MAX_CHARS = d.w // 5 - 1  # FONT_8 char width = 5
+    _MSG_Y0 = 10
+    _INPUT_Y = d.h - 44
+    _HINT_Y = d.h - 30
+    _MSG_LINES = (_INPUT_Y - _MSG_Y0) // _LINE_H
     _load_cfg(ctx)
     _load_convos(ctx)
     _state = _ST_SETUP if not _cfg["api_key"] else _ST_CONVOS

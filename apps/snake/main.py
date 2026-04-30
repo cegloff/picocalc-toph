@@ -6,11 +6,13 @@ from micropython import const
 from utime import ticks_ms, ticks_diff
 
 _CELL = const(10)
-_COLS = const(30)  # 300 / 10
-_ROWS = const(28)  # 280 / 10
 _OFFSET_X = const(10)
 _OFFSET_Y = const(20)
 _SPEED_MS = const(150)
+
+# Grid dimensions — computed from display size in start()
+_COLS = 30
+_ROWS = 28
 
 _DIR_UP = const(0)
 _DIR_DOWN = const(1)
@@ -55,8 +57,11 @@ def _reset():
 
 
 def start(ctx):
-    global _ctx
+    global _ctx, _COLS, _ROWS
     _ctx = ctx
+    d = ctx.display
+    _COLS = (d.w - 2 * _OFFSET_X) // _CELL
+    _ROWS = (d.h - _OFFSET_Y - _OFFSET_X) // _CELL
     _reset()
     return True
 
@@ -168,12 +173,13 @@ def _draw(ctx):
         msg = "GAME OVER"
         msg2 = "Score: {}".format(_score)
         msg3 = "ENTER=retry ESC=quit"
+        cy = d.h // 2 - 30
         tw = d.text_width(msg)
-        d.text((320 - tw) // 2, 130, msg, d.fg)
+        d.text((d.w - tw) // 2, cy, msg, d.fg)
         tw2 = d.text_width(msg2)
-        d.text((320 - tw2) // 2, 150, msg2, d.fg)
+        d.text((d.w - tw2) // 2, cy + 20, msg2, d.fg)
         tw3 = d.text_width(msg3)
-        d.text((320 - tw3) // 2, 170, msg3, d.fg)
+        d.text((d.w - tw3) // 2, cy + 40, msg3, d.fg)
 
     d.swap()
 

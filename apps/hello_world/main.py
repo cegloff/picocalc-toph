@@ -17,7 +17,7 @@ def run(ctx):
     d = ctx.display
     d.clear()
 
-    d.fill_rect(0, 0, 320, d.font_height() + 10, d.fg)
+    d.fill_rect(0, 0, d.w, d.font_height() + 10, d.fg)
     d.text(4, 5, "Hello World Plugin", d.bg)
 
     from gc import mem_free
@@ -31,7 +31,7 @@ def run(ctx):
 
     d.text(20, 150, "Battery: " + str(ctx.hw.battery_percent()) + "%", d.fg)
 
-    d.text(20, 280, "Press ESC or HOME to exit", d.fg)
+    d.text(20, d.h - 40, "Press ESC or HOME to exit", d.fg)
     d.swap()
 
     # check for back

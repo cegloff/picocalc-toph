@@ -17,11 +17,14 @@ _ST_MODE = const(6)
 # Layout
 _SB_H = const(10)
 _CONTENT_Y = const(10)
-_CONTENT_H = const(274)
-_ENTRY_Y = const(284)
 _ENTRY_H = const(18)
-_TB_Y = const(302)
 _TB_H = const(18)
+
+# Recomputed from display size in start()
+_DISPLAY_W = 320
+_CONTENT_H = 274
+_ENTRY_Y = 284
+_TB_Y = 302
 
 # State dict
 _S = None
@@ -69,9 +72,11 @@ def _load_mod(name):
     elif name == "graph":
         import _graph
         _mod = _graph
+        _mod.set_layout(_DISPLAY_W, _CONTENT_H, _ENTRY_Y)
     elif name == "table":
         import _table
         _mod = _table
+        _mod.set_layout(_DISPLAY_W, _CONTENT_H, _ENTRY_Y)
     collect()
 
 
@@ -85,7 +90,7 @@ def _unload_mod():
 
 def _draw_statusbar(d):
     from picoware.core.display import FONT_8
-    d.fill_rect(0, 0, 320, _SB_H, d.fg)
+    d.fill_rect(0, 0, d.w, _SB_H, d.fg)
     # Angle mode
     d.text(2, 1, _S["angle"], d.bg, FONT_8)
     # Graph type
@@ -93,24 +98,24 @@ def _draw_statusbar(d):
     # Number format
     nf = _S.get("nfmt", "AUTO")
     tw = len(nf) * 5
-    d.text(320 - tw - 2, 1, nf, d.bg, FONT_8)
+    d.text(d.w - tw - 2, 1, nf, d.bg, FONT_8)
 
 
 def _draw_entry(d):
     from picoware.core.display import FONT_12, GRAY
 
-    d.fill_rect(0, _ENTRY_Y, 320, _ENTRY_H, d.bg)
-    d.hline(0, _ENTRY_Y, 320, d.fg)
+    d.fill_rect(0, _ENTRY_Y, d.w, _ENTRY_H, d.bg)
+    d.hline(0, _ENTRY_Y, d.w, d.fg)
 
     entry = _S["entry"]
     cur = _S["cur"]
     escr = _S["escr"]
 
-    # Visible chars: FONT_12 cw=7, max ~44 chars with prompt
+    # Visible chars: FONT_12 cw=7
     cw = 7
     prompt = "> " if not _editing else _edit_label
     pw = len(prompt) * cw
-    max_vis = (316 - pw) // cw
+    max_vis = (d.w - 4 - pw) // cw
 
     # Auto-scroll
     if cur - escr > max_vis - 2:
@@ -127,15 +132,15 @@ def _draw_entry(d):
 
     # Cursor
     cx = 2 + pw + (cur - escr) * cw
-    if 0 <= cx < 318:
+    if 0 <= cx < d.w - 2:
         d.fill_rect(cx, _ENTRY_Y + 2, 2, _ENTRY_H - 4, d.fg)
 
 
 def _draw_toolbar(d):
     from picoware.core.display import FONT_8, GRAY, DARK_GRAY
 
-    d.fill_rect(0, _TB_Y, 320, _TB_H, d.bg)
-    d.hline(0, _TB_Y, 320, d.fg)
+    d.fill_rect(0, _TB_Y, d.w, _TB_H, d.bg)
+    d.hline(0, _TB_Y, d.w, d.fg)
 
     tb = _get_toolbar()
     if not tb:
@@ -176,8 +181,8 @@ def _draw_dropdown(d):
     # Position: align to F-key
     bw = 64
     x = fi * bw
-    if x + max_w > 320:
-        x = 320 - max_w
+    if x + max_w > d.w:
+        x = d.w - max_w
     y = _TB_Y - h
     if y < _CONTENT_Y:
         y = _CONTENT_Y
@@ -295,7 +300,7 @@ def _draw_mode(d):
         cur = _S.get(key, opts[0])
         line = "%s: %s" % (label, cur)
         if i == sel:
-            d.fill_rect(0, y, 320, fh + 4, d.fg)
+            d.fill_rect(0, y, d.w, fh + 4, d.fg)
             d.text(8, y + 2, line, d.bg, FONT_12)
         else:
             d.text(8, y + 2, line, d.fg, FONT_12)
@@ -626,7 +631,13 @@ def _load_state():
 
 def start(ctx):
     global _S, _ctx, _mod, _status_msg, _status_t, _editing, _edit_label
+    global _DISPLAY_W, _CONTENT_H, _ENTRY_Y, _TB_Y
     _ctx = ctx
+    d = ctx.display
+    _DISPLAY_W = d.w
+    _CONTENT_H = d.h - _SB_H - _ENTRY_H - _TB_H
+    _ENTRY_Y = _CONTENT_Y + _CONTENT_H
+    _TB_Y = _ENTRY_Y + _ENTRY_H
     _S = _init_state()
     _mod = None
     _status_msg = None

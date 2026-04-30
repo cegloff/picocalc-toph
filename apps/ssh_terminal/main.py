@@ -18,15 +18,30 @@ _ST_SETTINGS = const(4)
 _ST_DISCONNECTED = const(5)
 
 # Font table: (font_const, char_width, char_height, cols, rows)
-_FONTS = (
-    (5, 4, 6, 80, 53),    # FONT_6
-    (0, 5, 8, 64, 40),    # FONT_8
-    (1, 7, 12, 45, 26),   # FONT_12
-    (2, 11, 16, 29, 20),  # FONT_16
-    (3, 14, 20, 22, 16),  # FONT_20
-    (4, 17, 24, 18, 13),  # FONT_24
-)
-_FONT_LABELS = ("4x6 (80x53)", "5x8 (64x40)", "7x12 (45x26)", "11x16 (29x20)", "14x20 (22x16)", "17x24 (18x13)")
+# cols/rows are recomputed from display size in start(). Defaults assume 320x320.
+_FONTS = [
+    [5, 4, 6, 80, 53],    # FONT_6
+    [0, 5, 8, 64, 40],    # FONT_8
+    [1, 7, 12, 45, 26],   # FONT_12
+    [2, 11, 16, 29, 20],  # FONT_16
+    [3, 14, 20, 22, 16],  # FONT_20
+    [4, 17, 24, 18, 13],  # FONT_24
+]
+_FONT_LABELS = ["4x6", "5x8", "7x12", "11x16", "14x20", "17x24"]
+
+
+def _recalc_fonts(d):
+    """Recompute cols/rows for each font and refresh labels for the active display."""
+    global _FONT_LABELS
+    labels = []
+    for entry in _FONTS:
+        cw, ch = entry[1], entry[2]
+        cols = d.w // cw
+        rows = d.h // ch
+        entry[3] = cols
+        entry[4] = rows
+        labels.append("{}x{} ({}x{})".format(cw, ch, cols, rows))
+    _FONT_LABELS = labels
 
 # Data paths
 _SESSIONS_PATH = "picoware/data/ssh/sessions.json"
@@ -98,10 +113,10 @@ def _show_status(ctx, msg):
     d = ctx.display
     d.clear()
     fh = d.font_height()
-    d.fill_rect(0, 0, 320, fh + 10, d.fg)
+    d.fill_rect(0, 0, d.w, fh + 10, d.fg)
     d.text(4, 5, "SSH Terminal", d.bg)
     tw = d.text_width(msg)
-    d.text((320 - tw) // 2, 150, msg, d.fg)
+    d.text((d.w - tw) // 2, d.h // 2, msg, d.fg)
     d.swap()
 
 
@@ -347,6 +362,8 @@ def start(ctx):
         from picoware.ui.dialog import alert
         alert(ctx.display, ctx.input, "WiFi not connected", "SSH Terminal")
         return False
+
+    _recalc_fonts(ctx.display)
 
     _ssh = None
     _term = None

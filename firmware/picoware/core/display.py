@@ -57,7 +57,7 @@ def _rgb565_to_rgb332(c):
 
 
 class Display:
-    __slots__ = ('fg', 'bg', '_font')
+    __slots__ = ('fg', 'bg', '_font', 'w', 'h')
 
     W = 320
     H = 320
@@ -66,6 +66,8 @@ class Display:
         self.fg = fg
         self.bg = bg
         self._font = FONT_DEFAULT
+        self.w = Display.W
+        self.h = Display.H
         init(bg, mode)
         clear_framebuffer(_rgb565_to_rgb332(bg))
 

@@ -2,11 +2,19 @@
 
 import math
 
-# Layout
+# Layout — set by main.start(ctx) via set_layout()
+_W = 320
 _SB_H = 10
 _CONTENT_Y = 10
 _CONTENT_H = 274
 _ENTRY_Y = 284
+
+
+def set_layout(w, content_h, entry_y):
+    global _W, _CONTENT_H, _ENTRY_Y
+    _W = w
+    _CONTENT_H = content_h
+    _ENTRY_Y = entry_y
 
 
 def draw(d, S):
@@ -38,12 +46,12 @@ def draw(d, S):
         return
 
     n_cols = 1 + len(active)
-    col_w = 320 // n_cols
+    col_w = _W // n_cols
     fh = 12
 
     # Header
     hy = _CONTENT_Y
-    d.fill_rect(0, hy, 320, fh + 2, d.fg)
+    d.fill_rect(0, hy, _W, fh + 2, d.fg)
     var_name = "x" if gtype == "FUNC" else ("t" if gtype == "PAR" else "th")
     d.text(4, hy + 1, var_name, d.bg, FONT_12)
     for ci, (fi, label, _) in enumerate(active):
@@ -101,7 +109,7 @@ def draw_setup(d, S):
         val = S.get(key, 0)
         line = "%s = %s" % (label, _fmt(val))
         if i == sel:
-            d.fill_rect(0, y, 320, fh + 4, d.fg)
+            d.fill_rect(0, y, _W, fh + 4, d.fg)
             d.text(8, y + 2, line, d.bg, FONT_12)
         else:
             d.text(8, y + 2, line, d.fg, FONT_12)
