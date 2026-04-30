@@ -95,7 +95,7 @@ def _app_menu(ctx, apps):
 
 def _download_app(ctx, app):
     from picoware.ui.dialog import alert
-    from picoware.net.http import http_get
+    from picoware.net.http import HttpSession
 
     slug = app["slug"]
     name = app["name"]
@@ -118,34 +118,27 @@ def _download_app(ctx, app):
 
     ctx.storage.mkdir(tmp_rel)
 
+    session = HttpSession(_HOST)
+
     try:
-        for i, fname in enumerate(all_files):
-            _draw_progress(ctx, name, i, len(all_files), fname, 0, -1)
-            path = "/apps/{}/{}".format(slug, fname)
-            dest = "{}/{}".format(tmp_abs, fname)
-
-            for attempt in range(3):
-                gc.collect()
+        session.open()
+        try:
+            for i, fname in enumerate(all_files):
+                _draw_progress(ctx, name, i, len(all_files), fname, 0, -1)
+                path = "/apps/{}/{}".format(slug, fname)
+                dest = "{}/{}".format(tmp_abs, fname)
                 try:
-                    # Download entire file to memory first, then write to SD.
-                    # Streaming to SD during download causes heap fragmentation
-                    # from repeated SSL alloc/free cycles, eventually preventing
-                    # the FAT32 driver from allocating its buffers (EIO).
-                    data, _ = http_get(_HOST, path)
-                    gc.collect()
-                    f = open(dest, "wb")
-                    f.write(data)
-                    f.close()
-                    del data
-                    break  # success
+                    session.get_to_file(path, dest)
                 except Exception as e:
-                    if attempt < 2:
-                        print("Download retry:", fname, e)
-                        gc.collect()
-                    else:
-                        raise
-
-            gc.collect()
+                    print("Download error:", fname, e, "free=", gc.mem_free())
+                    try:
+                        uos.remove(dest)
+                    except:
+                        pass
+                    raise
+                gc.collect()
+        finally:
+            session.close()
 
         # success: swap temp → final
         if ctx.storage.exists(final_rel):
@@ -155,9 +148,11 @@ def _download_app(ctx, app):
 
     except Exception as e:
         print("Download error:", e)
-        # clean up temp
+        # clean up temp — guard with exists() so we don't log ENOENT noise
+        # when mkdir itself failed and the temp dir was never created.
         try:
-            _rmdir(ctx, tmp_rel)
+            if ctx.storage.exists(tmp_rel):
+                _rmdir(ctx, tmp_rel)
         except:
             pass
         alert(ctx.display, ctx.input, "Download failed: {}".format(e), "Error")

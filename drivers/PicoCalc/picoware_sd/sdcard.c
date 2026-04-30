@@ -24,6 +24,11 @@ static bool sd_initialised = false;
 static bool is_sdhc = false;      // Set this in sd_card_init()
 static uint8_t dummy_byte = 0xFF; // Single dummy byte for SPI
 
+// Transient SPI errors are absorbed by retrying. 3 attempts handles glitches
+// on marginal cards/contacts without masking real failures (a truly bad sector
+// or unplugged card still surfaces as EIO after the retries are exhausted).
+#define SD_RETRY_COUNT 3
+
 //
 // Low-level SD card SPI functions
 //
@@ -150,7 +155,7 @@ bool sd_is_sdhc(void)
 // Block-level read/write operations
 //
 
-sd_error_t sd_read_block(uint32_t block, uint8_t *buffer)
+static sd_error_t sd_read_block_once(uint32_t block, uint8_t *buffer)
 {
     int32_t addr = is_sdhc ? block : block * SD_BLOCK_SIZE;
     uint8_t response = sd_send_command(SD_CMD17, addr);
@@ -185,7 +190,20 @@ sd_error_t sd_read_block(uint32_t block, uint8_t *buffer)
     return SD_OK;
 }
 
-sd_error_t sd_write_block(uint32_t block, const uint8_t *buffer)
+sd_error_t sd_read_block(uint32_t block, uint8_t *buffer)
+{
+    sd_error_t result = SD_ERROR_READ_FAILED;
+    for (int attempt = 0; attempt < SD_RETRY_COUNT; attempt++)
+    {
+        result = sd_read_block_once(block, buffer);
+        if (result == SD_OK)
+            return SD_OK;
+        sleep_us(100);
+    }
+    return result;
+}
+
+static sd_error_t sd_write_block_once(uint32_t block, const uint8_t *buffer)
 {
     uint32_t addr = is_sdhc ? block : block * SD_BLOCK_SIZE;
     uint8_t response = sd_send_command(SD_CMD24, addr);
@@ -222,7 +240,20 @@ sd_error_t sd_write_block(uint32_t block, const uint8_t *buffer)
     return SD_OK;
 }
 
-sd_error_t sd_read_blocks(uint32_t start_block, uint32_t num_blocks, uint8_t *buffer)
+sd_error_t sd_write_block(uint32_t block, const uint8_t *buffer)
+{
+    sd_error_t result = SD_ERROR_WRITE_FAILED;
+    for (int attempt = 0; attempt < SD_RETRY_COUNT; attempt++)
+    {
+        result = sd_write_block_once(block, buffer);
+        if (result == SD_OK)
+            return SD_OK;
+        sleep_us(100);
+    }
+    return result;
+}
+
+static sd_error_t sd_read_blocks_once(uint32_t start_block, uint32_t num_blocks, uint8_t *buffer)
 {
     if (num_blocks == 0)
     {
@@ -232,7 +263,7 @@ sd_error_t sd_read_blocks(uint32_t start_block, uint32_t num_blocks, uint8_t *bu
     // For single block, use the simple read
     if (num_blocks == 1)
     {
-        return sd_read_block(start_block, buffer);
+        return sd_read_block_once(start_block, buffer);
     }
 
     // Multi-block read using CMD18
@@ -283,7 +314,20 @@ sd_error_t sd_read_blocks(uint32_t start_block, uint32_t num_blocks, uint8_t *bu
     return SD_OK;
 }
 
-sd_error_t sd_write_blocks(uint32_t start_block, uint32_t num_blocks, const uint8_t *buffer)
+sd_error_t sd_read_blocks(uint32_t start_block, uint32_t num_blocks, uint8_t *buffer)
+{
+    sd_error_t result = SD_ERROR_READ_FAILED;
+    for (int attempt = 0; attempt < SD_RETRY_COUNT; attempt++)
+    {
+        result = sd_read_blocks_once(start_block, num_blocks, buffer);
+        if (result == SD_OK)
+            return SD_OK;
+        sleep_us(100);
+    }
+    return result;
+}
+
+static sd_error_t sd_write_blocks_once(uint32_t start_block, uint32_t num_blocks, const uint8_t *buffer)
 {
     if (num_blocks == 0)
     {
@@ -293,7 +337,7 @@ sd_error_t sd_write_blocks(uint32_t start_block, uint32_t num_blocks, const uint
     // For single block, use the simple write
     if (num_blocks == 1)
     {
-        return sd_write_block(start_block, buffer);
+        return sd_write_block_once(start_block, buffer);
     }
 
     // Multi-block write using CMD25
@@ -351,6 +395,19 @@ sd_error_t sd_write_blocks(uint32_t start_block, uint32_t num_blocks, const uint
 
     sd_cs_deselect();
     return SD_OK;
+}
+
+sd_error_t sd_write_blocks(uint32_t start_block, uint32_t num_blocks, const uint8_t *buffer)
+{
+    sd_error_t result = SD_ERROR_WRITE_FAILED;
+    for (int attempt = 0; attempt < SD_RETRY_COUNT; attempt++)
+    {
+        result = sd_write_blocks_once(start_block, num_blocks, buffer);
+        if (result == SD_OK)
+            return SD_OK;
+        sleep_us(100);
+    }
+    return result;
 }
 
 //

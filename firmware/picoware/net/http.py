@@ -71,6 +71,80 @@ def http_get(host, path, port=443, use_ssl=True, callback=None, buf_size=512, he
             pass
 
 
+class HttpSession:
+    """
+    Persistent HTTP/1.1 connection — one TLS handshake amortized across many GETs.
+    """
+
+    def __init__(self, host, port=443, use_ssl=True):
+        self.host = host
+        self.port = port
+        self.use_ssl = use_ssl
+        self.sock = None
+
+    def open(self):
+        gc.collect()
+        addr = socket.getaddrinfo(self.host, self.port, 0, socket.SOCK_STREAM)[0][-1]
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(30)
+        sock.connect(addr)
+        if self.use_ssl:
+            import ssl
+            gc.collect()
+            sock = ssl.wrap_socket(sock, server_hostname=self.host)
+        self.sock = sock
+
+    def get_to_file(self, path, dest_path):
+        """GET path, stream body to dest_path on the same connection. Returns content_length."""
+        sock = self.sock
+        if sock is None:
+            raise Exception("session not open")
+
+        req = "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: keep-alive\r\n\r\n".format(path, self.host)
+        _send(sock, req.encode())
+
+        line = _readline(sock)
+        parts = line.split(b' ', 2)
+        status = int(parts[1]) if len(parts) >= 2 else 0
+        if status != 200:
+            raise Exception("HTTP {}".format(status))
+
+        content_length = -1
+        while True:
+            line = _readline(sock)
+            if not line or line == b'\r\n' or line == b'\n':
+                break
+            if line.lower().startswith(b'content-length:'):
+                content_length = int(line.split(b':', 1)[1].strip())
+
+        # HTTP/1.1 keep-alive requires reading exactly content-length bytes —
+        # there's no EOF marker between responses on the shared socket.
+        if content_length < 0:
+            raise Exception("missing content-length")
+
+        f = open(dest_path, "wb")
+        try:
+            remaining = content_length
+            while remaining > 0:
+                want = 1024 if remaining > 1024 else remaining
+                chunk = sock.read(want) if hasattr(sock, 'read') else sock.recv(want)
+                if not chunk:
+                    raise Exception("EOF at {}/{}".format(content_length - remaining, content_length))
+                f.write(chunk)
+                remaining -= len(chunk)
+        finally:
+            f.close()
+        return content_length
+
+    def close(self):
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except:
+                pass
+            self.sock = None
+
+
 def http_post(host, path, body=None, headers=None, port=443, use_ssl=True,
               stream=False, buf_size=512):
     """
