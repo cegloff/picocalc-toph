@@ -19,13 +19,14 @@ _ST_DISCONNECTED = const(5)
 
 # Font table: (font_const, char_width, char_height, cols, rows)
 _FONTS = (
+    (5, 4, 6, 80, 53),    # FONT_6
     (0, 5, 8, 64, 40),    # FONT_8
     (1, 7, 12, 45, 26),   # FONT_12
     (2, 11, 16, 29, 20),  # FONT_16
     (3, 14, 20, 22, 16),  # FONT_20
     (4, 17, 24, 18, 13),  # FONT_24
 )
-_FONT_LABELS = ("5x8 (64x40)", "7x12 (45x26)", "11x16 (29x20)", "14x20 (22x16)", "17x24 (18x13)")
+_FONT_LABELS = ("4x6 (80x53)", "5x8 (64x40)", "7x12 (45x26)", "11x16 (29x20)", "14x20 (22x16)", "17x24 (18x13)")
 
 # Data paths
 _SESSIONS_PATH = "picoware/data/ssh/sessions.json"
@@ -38,7 +39,7 @@ _term = None
 _menu = None
 _sessions = []
 _cur_session = None  # index into _sessions
-_app_settings = {"font": 1, "scrollback": 100}
+_app_settings = {"font": 2, "scrollback": 100}
 _need_draw = True
 _edit_session = None  # dict being edited
 
@@ -77,7 +78,7 @@ def _load_app_settings(ctx):
     global _app_settings
     data = ctx.storage.read_json(_SETTINGS_PATH)
     if data:
-        _app_settings["font"] = data.get("font", 1)
+        _app_settings["font"] = data.get("font", 2)
         _app_settings["scrollback"] = data.get("scrollback", 100)
 
 
@@ -89,7 +90,7 @@ def _save_app_settings(ctx):
 def _get_font_info():
     idx = _app_settings["font"]
     if idx < 0 or idx >= len(_FONTS):
-        idx = 1
+        idx = 2
     return _FONTS[idx]
 
 

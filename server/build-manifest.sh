@@ -16,6 +16,9 @@ for app_json in "$APPS_DIR"/*/app.json; do
     # Read name from app.json
     name=$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$app_json")
 
+    # Read platforms array from app.json (keeps raw JSON array text)
+    platforms=$(sed -n 's/.*"platforms"[[:space:]]*:[[:space:]]*\(\[[^]]*\]\).*/\1/p' "$app_json")
+
     # List .py files
     files=""
     for f in "$app_dir"/*.py; do
@@ -40,8 +43,13 @@ for app_json in "$APPS_DIR"/*/app.json; do
         printf ',' >> "$OUT"
     fi
 
-    printf '{"slug":"%s","name":"%s","files":[%s],"size":%s}' \
-        "$slug" "$name" "$files" "$size" >> "$OUT"
+    if [ -n "$platforms" ]; then
+        printf '{"slug":"%s","name":"%s","files":[%s],"size":%s,"platforms":%s}' \
+            "$slug" "$name" "$files" "$size" "$platforms" >> "$OUT"
+    else
+        printf '{"slug":"%s","name":"%s","files":[%s],"size":%s}' \
+            "$slug" "$name" "$files" "$size" >> "$OUT"
+    fi
 done
 
 printf ']}' >> "$OUT"

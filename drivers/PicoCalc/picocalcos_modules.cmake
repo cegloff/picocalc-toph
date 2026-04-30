@@ -89,6 +89,7 @@ target_link_libraries(usermod_picoware_sd INTERFACE pico_stdlib pico_printf pico
 add_library(usermod_font INTERFACE)
 target_sources(usermod_font INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/../font/font_mp.c
+    ${CMAKE_CURRENT_LIST_DIR}/../font/font6.c
     ${CMAKE_CURRENT_LIST_DIR}/../font/font8.c
     ${CMAKE_CURRENT_LIST_DIR}/../font/font12.c
     ${CMAKE_CURRENT_LIST_DIR}/../font/font16.c

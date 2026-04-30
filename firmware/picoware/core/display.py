@@ -39,6 +39,7 @@ FONT_12 = 1
 FONT_16 = 2
 FONT_20 = 3
 FONT_24 = 4
+FONT_6 = 5
 
 # Font pixel dimensions: (char_width, char_height) for each font index
 _FONT_DIMS = (
@@ -47,6 +48,7 @@ _FONT_DIMS = (
     (11, 16),  # FONT_16
     (14, 20),  # FONT_20
     (17, 24),  # FONT_24
+    (4, 6),    # FONT_6
 )
 
 

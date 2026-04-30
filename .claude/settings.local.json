@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(bash:*)",
+      "Bash(where micropython:*)",
+      "Bash(wsl:*)",
+      "Bash(xargs grep:*)",
+      "Bash(grep:*)",
+      "Bash(git add *)"
+    ]
+  }
+}

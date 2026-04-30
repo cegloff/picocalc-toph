@@ -45,6 +45,7 @@ typedef enum
   FONT_MEDIUM = 2,     // Medium (English)
   FONT_LARGE = 3,      // Large (English)
   FONT_XTRA_LARGE = 4, // Extra large (English)
+  FONT_TINY = 5,       // Tiny 4x6 (English)
 } FontSize;
 
 // ASCII
@@ -61,6 +62,7 @@ extern "C"
 {
 #endif
 
+  extern const FontTable Font6;
   extern const FontTable Font8;
   extern const FontTable Font12;
   extern const FontTable Font16;

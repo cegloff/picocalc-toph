@@ -41,6 +41,8 @@ const uint8_t *font_get_data(FontSize size)
     return Font20.table;
   case FONT_XTRA_LARGE:
     return Font24.table;
+  case FONT_TINY:
+    return Font6.table;
   default:
     return Font8.table;
   }
@@ -60,6 +62,8 @@ FontTable font_get_table(FontSize size)
     return Font20;
   case FONT_XTRA_LARGE:
     return Font24;
+  case FONT_TINY:
+    return Font6;
   default:
     return Font8;
   }
@@ -79,6 +83,8 @@ uint8_t font_get_height(FontSize size)
     return Font20.height;
   case FONT_XTRA_LARGE:
     return Font24.height;
+  case FONT_TINY:
+    return Font6.height;
   default:
     return Font8.height;
   }
@@ -98,6 +104,8 @@ uint8_t font_get_spacing(FontSize size)
     return Font20.spacing;
   case FONT_XTRA_LARGE:
     return Font24.spacing;
+  case FONT_TINY:
+    return Font6.spacing;
   default:
     return Font8.spacing;
   }
@@ -117,6 +125,8 @@ uint8_t font_get_width(FontSize size)
     return Font20.width;
   case FONT_XTRA_LARGE:
     return Font24.width;
+  case FONT_TINY:
+    return Font6.width;
   default:
     return Font8.width;
   }
@@ -273,6 +283,9 @@ void font_size_mp_print(const mp_print_t *print, mp_obj_t self_in, mp_print_kind
     break;
   case FONT_XTRA_LARGE:
     mp_print_str(print, "FONT_XTRA_LARGE");
+    break;
+  case FONT_TINY:
+    mp_print_str(print, "FONT_TINY");
     break;
   default:
     mp_print_str(print, "UNKNOWN");

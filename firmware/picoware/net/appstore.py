@@ -124,29 +124,22 @@ def _download_app(ctx, app):
             path = "/apps/{}/{}".format(slug, fname)
             dest = "{}/{}".format(tmp_abs, fname)
 
-            for attempt in range(2):
-                f = open(dest, "wb")
-                written = [0]
-                cl = [0]
-                _next_draw = [2048]
-
-                def _on_chunk(chunk, _f=f, _w=written, _ctx=ctx, _name=name,
-                              _i=i, _total=len(all_files), _fname=fname,
-                              _cl=cl, _nd=_next_draw):
-                    _f.write(chunk)
-                    _w[0] += len(chunk)
-                    if _w[0] >= _nd[0]:
-                        _nd[0] = _w[0] + 2048
-                        _draw_progress(_ctx, _name, _i, _total, _fname, _w[0], _cl[0])
-
+            for attempt in range(3):
+                gc.collect()
                 try:
-                    total, content_length = http_get(_HOST, path, callback=_on_chunk)
-                    cl[0] = content_length
+                    # Download entire file to memory first, then write to SD.
+                    # Streaming to SD during download causes heap fragmentation
+                    # from repeated SSL alloc/free cycles, eventually preventing
+                    # the FAT32 driver from allocating its buffers (EIO).
+                    data, _ = http_get(_HOST, path)
+                    gc.collect()
+                    f = open(dest, "wb")
+                    f.write(data)
                     f.close()
+                    del data
                     break  # success
                 except Exception as e:
-                    f.close()
-                    if attempt == 0:
+                    if attempt < 2:
                         print("Download retry:", fname, e)
                         gc.collect()
                     else:
@@ -178,7 +171,7 @@ def _rmdir(ctx, rel_path):
     ctx.storage.remove(rel_path)
 
 
-def _draw_progress(ctx, app_name, file_idx, file_count, filename, bytes_done, content_length):
+def _draw_progress(ctx, app_name, file_idx, file_count, filename, _bytes_done, _content_length):
     d = ctx.display
     d.clear()
     fh = d.font_height()
@@ -195,20 +188,14 @@ def _draw_progress(ctx, app_name, file_idx, file_count, filename, bytes_done, co
     y += fh + 12
     d.text(8, y, "File {}/{}: {}".format(file_idx + 1, file_count, filename), d.fg)
 
-    # progress bar
+    # file-level progress bar
     y += fh + 16
     bar_x, bar_w, bar_h = 16, 288, 20
     d.rect(bar_x, y, bar_w, bar_h, d.fg)
-    if content_length > 0:
-        fill_w = min(bar_w - 4, (bar_w - 4) * bytes_done // content_length)
+    if file_count > 0:
+        fill_w = (bar_w - 4) * file_idx // file_count
         if fill_w > 0:
             d.fill_rect(bar_x + 2, y + 2, fill_w, bar_h - 4, d.fg)
-        y += bar_h + 8
-        d.text(8, y, "{}KB / {}KB".format(bytes_done // 1024, content_length // 1024), d.fg)
-    else:
-        # indeterminate: show bytes downloaded
-        y += bar_h + 8
-        d.text(8, y, "{}KB downloaded".format(bytes_done // 1024), d.fg)
 
     d.swap()
 
